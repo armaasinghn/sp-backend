@@ -52,7 +52,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--acc);box-shadow:0 0 0
 input::placeholder{color:var(--dim)}
 
 /* ── LAYOUT ── */
-#app{display:flex;min-height:100vh}
+#app{display:flex;min-height:100vh;width:100%}
 .sidebar{width:220px;background:var(--navy);display:flex;flex-direction:column;flex-shrink:0;border-right:1px solid rgba(255,255,255,.06)}
 .main{flex:1;background:var(--surf);overflow-y:auto;display:flex;flex-direction:column;min-height:0}
 
@@ -158,7 +158,7 @@ tr.row-link:hover td{background:#f0f9ff}
 
 /* ── LOGIN ── */
 .app-shell{display:flex;height:100vh;overflow:hidden;width:100%}
-.login-page{min-height:100vh;display:flex;flex-direction:column;background:#0a1628}
+.login-page{width:100%;min-height:100vh;display:flex;flex-direction:column;background:#0a1628}
 .login-header{height:62px;padding:0 36px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;position:relative;z-index:10;border-bottom:1px solid rgba(6,182,212,.15)}
 .login-body{flex:1;display:grid;grid-template-columns:1fr 1fr;min-height:calc(100vh - 62px)}
 .login-left{position:relative;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:52px 48px;overflow:hidden;background:linear-gradient(145deg,#0a1628 0%,#0d2035 55%,#071520 100%)}
@@ -296,10 +296,14 @@ tr.row-link:hover td{background:#f0f9ff}
   .twrap table{ min-width:580px; }
 
   /* Login: hide left panel, full-width right */
+  .login-page{ width:100vw!important; }
   .login-body{ grid-template-columns:1fr!important; min-height:auto!important; }
   .login-left{ display:none!important; }
   .login-right{ padding:24px 18px!important; min-height:100vh; justify-content:flex-start!important; }
   .glass-card{ padding:20px 18px!important; }
+  /* Register page mobile */
+  .reg-card-head{ padding:24px 20px 18px!important; }
+  .reg-card-body{ padding:20px 20px 28px!important; }
 
   /* Max widths go full */
   [style*="max-width:780px"],[style*="max-width:860px"],
@@ -327,7 +331,7 @@ tr.row-link:hover td{background:#f0f9ff}
 .user-dropdown{display:none;position:fixed;background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 32px rgba(11,17,32,.14);min-width:210px;width:min(210px,calc(100vw - 24px));z-index:9999;overflow:hidden;animation:dropIn .15s ease}.user-dropdown.open{display:block}@keyframes dropIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}.user-dd-hdr{padding:14px 16px;border-bottom:1px solid var(--border);background:var(--surf)}.user-dd-name{font-weight:700;font-size:14px;color:var(--navy)}.user-dd-role{font-size:12px;color:var(--muted);text-transform:capitalize;margin-top:2px}.user-dd-item{display:flex;align-items:center;gap:10px;padding:11px 16px;font-size:13.5px;color:var(--slate);cursor:pointer;transition:background .15s;font-family:var(--font-body);border:none;background:none;width:100%;text-align:left}.user-dd-item:hover{background:var(--surf);color:var(--navy)}.user-dd-sep{height:1px;background:var(--border)}.user-dd-item.danger{color:var(--red)}
 
 /* ── VISITOR SELF-REGISTRATION ──────────────────────────────── */
-.reg-page{min-height:100vh;background:var(--surf);display:flex;flex-direction:column}
+.reg-page{width:100%;min-height:100vh;background:var(--surf);display:flex;flex-direction:column}
 .reg-header{background:#fff;border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;justify-content:space-between}
 .reg-header-logo{display:flex;align-items:center;gap:10px}
 .reg-body{flex:1;display:flex;align-items:flex-start;justify-content:center;padding:32px 16px 48px}

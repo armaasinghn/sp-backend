@@ -1560,12 +1560,15 @@ async function requestPage(){
     '<div class="card" style="padding:28px">'+
 
       // Auto-fill row
-      '<div style="display:flex;gap:10px;margin-bottom:22px;padding-bottom:22px;border-bottom:1px solid var(--border)">'+
-        '<div style="flex:1;position:relative">'+
-          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" style="position:absolute;left:11px;top:50%;transform:translateY(-50%)"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'+
-          '<input id="vis-lookup" placeholder="Returning visitor? Search by phone, email or name to auto-fill" style="padding-left:34px"/>'+
+      '<div style="margin-bottom:22px;padding-bottom:22px;border-bottom:1px solid var(--border)">'+
+        '<div style="display:flex;gap:10px">'+
+          '<div style="flex:1;position:relative">'+
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" style="position:absolute;left:11px;top:50%;transform:translateY(-50%)"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'+
+            '<input id="vis-lookup" placeholder="Returning visitor? Search by phone, email or name to auto-fill" style="padding-left:34px" onkeydown="if(event.key===\'Enter\')lookupInline()"/>'+
+          '</div>'+
+          '<button class="btn bo" onclick="lookupInline()" style="white-space:nowrap">Auto-fill</button>'+
         '</div>'+
-        '<button class="btn bo" onclick="lookupInline()" style="white-space:nowrap">Auto-fill</button>'+
+        '<div id="lookup-disambig"></div>'+
       '</div>'+
 
       // All fields
@@ -1689,45 +1692,107 @@ function onMoSelect(id){
   selectedHost = staffUsers.find(function(u){ return u.id === id; }) || null;
 }
 
+function fillVisitorFields(found){
+  var sv = function(id,val){ var el=document.getElementById(id); if(el && val!=null && val!=='') el.value=val; };
+  sv('vn',found.name); sv('vp',found.phone); sv('ve',found.email||'');
+  sv('vc',found.co||''); sv('vaddr',found.address||'');
+  sv('vvn',found.vehicle||'');
+  if(found.nat){
+    var vitEl=document.getElementById('vit');
+    if(vitEl){ vitEl.value=found.nat; onVitChange(found.nat); }
+  }
+  sv('vi',found.natid||'');
+  if(found.vtype){ var vvtEl=document.getElementById('vvt'); if(vvtEl) vvtEl.value=found.vtype; }
+  var db=document.getElementById('lookup-disambig'); if(db) db.innerHTML='';
+  toast('Auto-filled: '+found.name);
+}
+
+function showDisambig(candidates){
+  // All candidates share the same name — ask for mobile to pick one
+  var db=document.getElementById('lookup-disambig'); if(!db) return;
+  db.innerHTML=
+    '<div style="margin-top:10px;padding:12px 14px;background:var(--amber,#fffbeb);border:1px solid #fde68a;border-radius:9px">'+
+      '<div style="font-size:12.5px;font-weight:600;color:#92400e;margin-bottom:8px">'+
+        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'+
+        candidates.length+' visitors named "'+candidates[0].name+'" found. Enter mobile number to identify the right one.'+
+      '</div>'+
+      '<div style="display:flex;gap:8px">'+
+        '<input id="disambig-phone" type="tel" placeholder="Enter mobile number" '+
+          'style="flex:1;padding:8px 11px;border:1px solid #fcd34d;border-radius:7px;font-size:13px;outline:none;background:#fff" '+
+          'onkeydown="if(event.key===\'Enter\')resolveDisambig()" />'+
+        '<button class="btn bo" onclick="resolveDisambig()" style="font-size:12px;white-space:nowrap;border-color:#fcd34d;color:#92400e">Verify</button>'+
+        '<button onclick="var db=document.getElementById(\'lookup-disambig\');if(db)db.innerHTML=\'\'" '+
+          'style="background:none;border:none;cursor:pointer;font-size:18px;color:#92400e;line-height:1;padding:0 4px" title="Dismiss">×</button>'+
+      '</div>'+
+      '<div id="disambig-err" style="font-size:11.5px;color:var(--red);margin-top:5px;display:none"></div>'+
+    '</div>';
+  // Store candidates on the element for resolveDisambig to read
+  db._candidates = candidates;
+  setTimeout(function(){ var el=document.getElementById('disambig-phone'); if(el) el.focus(); }, 50);
+}
+
+function resolveDisambig(){
+  var db=document.getElementById('lookup-disambig'); if(!db) return;
+  var candidates = db._candidates||[];
+  var raw = (document.getElementById('disambig-phone')||{}).value||'';
+  var digits = raw.replace(/\D/g,'');
+  var errEl = document.getElementById('disambig-err');
+  if(!digits){ if(errEl){errEl.textContent='Please enter a mobile number.';errEl.style.display='';} return; }
+  // Match: last 10 digits of stored phone vs entered digits
+  var match = candidates.find(function(c){
+    var cd = (c.phone||'').replace(/\D/g,'');
+    return cd.endsWith(digits) || digits.endsWith(cd.slice(-10));
+  });
+  if(match){
+    fillVisitorFields(match);
+  } else {
+    if(errEl){
+      errEl.textContent='No match found for that mobile number. Please check and try again.';
+      errEl.style.display='';
+    }
+    var inp=document.getElementById('disambig-phone');
+    if(inp){ inp.style.borderColor='var(--red)'; setTimeout(function(){inp.style.borderColor='';},1500); }
+  }
+}
+
 async function lookupInline(){
   var q = ($('vis-lookup')||{}).value||'';
   if(!q.trim()){ toast('Enter a name, phone or email','warn'); return; }
-  var sv = function(id,val){ var el=document.getElementById(id); if(el && val!=null && val!=='') el.value=val; };
+  var db=document.getElementById('lookup-disambig'); if(db) db.innerHTML='';
   try {
-    // Search visitor profiles first, then fall back to pass history
-    var found = null;
+    var candidates = [];
+    // 1. Search registered visitor profiles
     try {
-      var r1 = await apiFetch('GET','/visitors?search='+encodeURIComponent(q.trim())+'&limit=1');
-      if((r1.data||[]).length) found = mapVisitor(r1.data[0]);
+      var r1 = await apiFetch('GET','/visitors?search='+encodeURIComponent(q.trim())+'&limit=5');
+      candidates = (r1.data||[]).map(function(v){ return mapVisitor(v); }).map(function(v){
+        return { name:v.name, phone:v.phone, email:v.email||'', co:v.co||'',
+                 address:v.address||'', vehicle:v.vehicle||'', vtype:v.vtype||'',
+                 nat:v.nat||'', natid:v.natid||'' };
+      });
     } catch(e){}
-    if(!found){
+    // 2. Fall back to pass history
+    if(!candidates.length){
       var r2 = await apiFetch('GET','/passes/visitor-lookup?q='+encodeURIComponent(q.trim()));
-      var list2 = r2.data||[];
-      if(list2.length){
-        var p = list2[0];
-        found = {
-          name:p.visitor_name, phone:p.visitor_phone, email:p.visitor_email||'',
-          co:p.visitor_company||'', address:p.visitor_address||'',
-          vehicle:p.vehicle_number||'', vtype:p.vehicle_type||'',
-          nat:p.govt_id_type||'', natid:p.govt_id_number||''
-        };
-      }
+      candidates = (r2.data||[]).map(function(p){
+        return { name:p.visitor_name, phone:p.visitor_phone, email:p.visitor_email||'',
+                 co:p.visitor_company||'', address:p.visitor_address||'',
+                 vehicle:p.vehicle_number||'', vtype:p.vehicle_type||'',
+                 nat:p.govt_id_type||'', natid:p.govt_id_number||'' };
+      });
     }
-    if(found){
-      sv('vn',found.name); sv('vp',found.phone); sv('ve',found.email);
-      sv('vc',found.co); sv('vaddr',found.address);
-      sv('vvn',found.vehicle);
-      // Fill ID type + number
-      if(found.nat){
-        var vitEl=document.getElementById('vit');
-        if(vitEl){ vitEl.value=found.nat; onVitChange(found.nat); }
-      }
-      sv('vi',found.natid);
-      // Fill vehicle type
-      if(found.vtype){ var vvtEl=document.getElementById('vvt'); if(vvtEl) vvtEl.value=found.vtype; }
-      toast('Auto-filled: '+found.name);
-    } else {
+    if(!candidates.length){
       toast('No record found — fill in manually','warn');
+      return;
+    }
+    // Check if all results share the same name (ambiguous)
+    var uniqueNames = candidates.map(function(c){ return c.name.toLowerCase().trim(); })
+                                .filter(function(n,i,a){ return a.indexOf(n)===i; });
+    if(candidates.length > 1 && uniqueNames.length === 1){
+      // All same name, different people — need phone verification
+      showDisambig(candidates);
+    } else {
+      // Unique result or different names — just use the best match
+      fillVisitorFields(candidates[0]);
     }
   } catch(e){ toast('Search failed — fill in manually','warn'); }
 }

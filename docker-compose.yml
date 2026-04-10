@@ -1,0 +1,59 @@
+version: '3.9'
+
+services:
+
+  # ── PostgreSQL ─────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: sp-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       securitypass
+      POSTGRES_USER:     sp_user
+      POSTGRES_PASSWORD: sp_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations/001_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./seeds/001_seed.sql:/docker-entrypoint-initdb.d/02_seed.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sp_user -d securitypass"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── API Backend ────────────────────────────────────────────
+  api:
+    build: .
+    container_name: sp-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV:       production
+      PORT:           3000
+      DB_HOST:        db
+      DB_PORT:        5432
+      DB_NAME:        securitypass
+      DB_USER:        sp_user
+      DB_PASSWORD:    sp_password
+      JWT_SECRET:     change_this_in_production_to_a_long_random_string
+      JWT_EXPIRES_IN: 8h
+      CORS_ORIGIN:    http://localhost:5173
+    ports:
+      - "3000:3000"
+    volumes:
+      - uploads:/app/uploads
+      - logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  pgdata:
+  uploads:
+  logs:

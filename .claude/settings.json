@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node seeds/run.js)",
+      "Bash(npm install:*)",
+      "Bash(node -e \"require\\('dotenv'\\).config\\(\\); const {pool} = require\\('./config/database'\\); pool.connect\\(\\).then\\(c => { console.log\\('DB connected'\\); c.release\\(\\); pool.end\\(\\); }\\).catch\\(e => { console.error\\('DB error:', e.message\\); pool.end\\(\\); }\\)\")",
+      "Bash(node -e \"require\\('dotenv'\\).config\\(\\); const {pool} = require\\('./config/database'\\); pool.connect\\(\\).then\\(c => { console.log\\('DB connected'\\); c.release\\(\\); pool.end\\(\\); }\\).catch\\(e => { console.error\\('DB error:', e\\); pool.end\\(\\); }\\)\")",
+      "Bash(psql --version)",
+      "Bash(brew services:*)",
+      "Bash(pg_isready)",
+      "Bash(npm run:*)",
+      "Bash(psql securitypass:*)",
+      "Read(//Users/armaansinhmar/Downloads/**)",
+      "Bash(unzip -o SecurityPass_Deployment_files.zip -d SecurityPass_Deployment_files)",
+      "Bash(tar -tzf securitypass-v1.0-production.tar.gz)",
+      "Bash(tar -xzf securitypass-v1.0-production.tar.gz)",
+      "Bash(mkdir -p /Users/armaansinhmar/Downloads/sp-backend/public)",
+      "Bash(cp /Users/armaansinhmar/Downloads/SecurityPass_Deployment_files/securitypass/index.html /Users/armaansinhmar/Downloads/sp-backend/public/index.html)",
+      "Bash(node -e \"require\\('./src/server'\\)\")",
+      "Bash(curl -s -X POST http://localhost:3000/api/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"admin@securitypass.local\",\"password\":\"password\"}')",
+      "Bash(node src/server.js)",
+      "Bash(curl -s -X POST http://localhost:3001/api/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"admin@securitypass.local\",\"password\":\"password\"}')",
+      "Bash(PORT=3001 node src/server.js)",
+      "Bash(curl -s -X POST http://localhost:3001/api/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"admin@securitypass.local\",\"password\":\"password\"}')",
+      "Bash(curl -v http://localhost:3001/api/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"admin@securitypass.local\",\"password\":\"password\"}')",
+      "Bash(curl -s http://localhost:3001/api/auth/login -X POST -H \"Content-Type: application/json\" -d '{\"email\":\"admin@securitypass.local\",\"password\":\"password\"}' -w \"\\\\n%{http_code}\")",
+      "Bash(curl -s http://localhost:3001/api/health -w \"\\\\n%{http_code}\")",
+      "Bash(kill 3465)",
+      "Bash(curl -s -X POST http://localhost:4000/api/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"admin@securitypass.local\",\"password\":\"password\"}')",
+      "Bash(node -e ':*)"
+    ]
+  }
+}

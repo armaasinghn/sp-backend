@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e ':*)",
+      "Bash(psql -U sp_user -d securitypass -c 'UPDATE users SET password_hash = '\\\\''$2a$12$TgYsFjTNI87BnU7wMIQJ/.HGB2Pn3M4Ojb9a4acYX9oFnVWSXhqLW'\\\\'' WHERE email IN \\('\\\\''admin@securitypass.local'\\\\'', '\\\\''visitor@securitypass.local'\\\\'', '\\\\''anjali@company.com'\\\\''\\);')",
+      "Bash(psql -U sp_user -d securitypass -c 'UPDATE users SET password_hash = '\\\\''$2a$12$irPYz8Hg.71wmRQy7.j5H.8uHECXAWWtK6Goh7Z.eTlbOOsS1tOue'\\\\'' WHERE email = '\\\\''priya@company.com'\\\\'';')",
+      "Bash(node -e \"require\\('bcryptjs'\\).hash\\('pass@123',10\\).then\\(function\\(h\\){console.log\\(h\\)}\\)\")",
+      "Bash(psql -U sp_user -d securitypass -c \"UPDATE users SET password_hash = '\\\\$2a\\\\$10\\\\$7OUzxBIHYjoLTxmXD/ihTOdf2H0lJtl7miz20jRvmxueiIhgpThbO' WHERE email NOT IN \\('admin@securitypass.local', 'visitor@securitypass.local', 'anjali@company.com', 'priya@company.com'\\);\")",
+      "Bash(ls /Users/armaansinhmar/Downloads/sp-backend/.env*)",
+      "Bash(ls /Users/armaansinhmar/Downloads/sp-backend/*.env*)",
+      "Bash(curl -s http://localhost:4000/)",
+      "Bash(python3 -c ':*)",
+      "Bash(python3 -m json.tool)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); notifs=d.get\\('data',{}\\).get\\('notifications',d.get\\('data',[]\\)\\); print\\('Notifications:', len\\(notifs\\)\\)\")",
+      "Bash(node /tmp/test_script.js)",
+      "Read(//private/tmp/**)",
+      "Bash(grep -n '\\\\`')",
+      "Bash(node --input-type=module)",
+      "Bash(node --check /Users/armaansinhmar/Downloads/sp-backend/public/index.html)"
+    ]
+  }
+}

@@ -181,6 +181,12 @@ tr.row-link:hover td{background:#f0f9ff}
 .stat-box{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.11);border-radius:14px;padding:18px 14px;text-align:center;flex:1}
 .trust-badge{display:flex;align-items:center;gap:10px;padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);border-radius:12px}
 
+/* ── EXPORT BUTTONS ── */
+.btn-export-pdf{background:#ef4444;color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:13.5px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-family:var(--font-body);transition:background .15s}
+.btn-export-pdf:hover{background:#dc2626}
+.btn-export-excel{background:#10b981;color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:13.5px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-family:var(--font-body);transition:background .15s}
+.btn-export-excel:hover{background:#059669}
+
 /* ── QR ── */
 .qr-wrap{background:#fff;border:1px solid var(--border);border-radius:var(--rmd);padding:14px;display:inline-block}
 
@@ -411,6 +417,9 @@ tr.row-link:hover td{background:#f0f9ff}
 
 </style>
 <script src="/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body>
 <div id="toast"></div>
@@ -1190,6 +1199,116 @@ async function dashPage(){
 }
 
 
+/* ── EXPORT HELPERS ─────────────────────────────── */
+function getFilteredPasses(){
+  return passes || [];
+}
+function getExportLabel(){
+  return (fstatus && fstatus !== 'all')
+    ? fstatus.charAt(0).toUpperCase() + fstatus.slice(1)
+    : 'All';
+}
+function fmtExport(val){
+  if(!val) return '';
+  return new Date(val).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+
+function exportPassesExcel(){
+  if(typeof XLSX === 'undefined'){ toast('Excel library not loaded yet — try again','warn'); return; }
+  var data = getFilteredPasses();
+  if(!data.length){ toast('No passes to export','warn'); return; }
+  var rows = data.map(function(p){
+    return {
+      'Pass #':          p.num,
+      'Visitor Name':    p.vname,
+      'Contact':         p.vphone,
+      'Company':         p.vco||'',
+      'Meeting Officer': p.host,
+      'Department':      p.dept,
+      'Purpose':         p.purpose,
+      'Valid From':      fmtExport(p.from),
+      'Valid Until':     fmtExport(p.until),
+      'Status':          p.status,
+      'Approved By':     p.approved_by||'',
+      'Approved At':     fmtExport(p.approved_at),
+    };
+  });
+  var ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{wch:22},{wch:22},{wch:15},{wch:20},{wch:20},{wch:16},{wch:13},{wch:22},{wch:22},{wch:11},{wch:20},{wch:22}];
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Passes');
+  var label = getExportLabel();
+  var date  = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, 'SecurityPass_'+label+'_'+date+'.xlsx');
+  toast('Excel downloaded — '+data.length+' passes');
+}
+
+function exportPassesPDF(){
+  if(!window.jspdf || !window.jspdf.jsPDF){ toast('PDF library not loaded yet — try again','warn'); return; }
+  var data = getFilteredPasses();
+  if(!data.length){ toast('No passes to export','warn'); return; }
+  var doc = new window.jspdf.jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+  var label = getExportLabel();
+  var date  = new Date().toLocaleDateString('en-IN');
+
+  doc.setFontSize(16);
+  doc.setTextColor(8,145,178);
+  doc.text('SecurityPass \u2014 Access Management',14,16);
+  doc.setFontSize(10);
+  doc.setTextColor(100);
+  doc.text(label+' Passes \u00b7 Exported on '+date,14,23);
+  doc.setFontSize(9);
+  doc.setTextColor(140);
+  doc.text('Total: '+data.length+' record'+(data.length!==1?'s':''),14,29);
+
+  var rows = data.map(function(p){
+    return [
+      p.num, p.vname, p.vphone, p.host, p.dept,
+      p.purpose, fmtExport(p.from), fmtExport(p.until),
+      (p.status||'').toUpperCase()
+    ];
+  });
+
+  doc.autoTable({
+    startY: 33,
+    head:[['Pass #','Visitor','Contact','Meeting Officer','Dept','Purpose','Valid From','Valid Until','Status']],
+    body: rows,
+    styles:{fontSize:8,cellPadding:3,overflow:'linebreak'},
+    headStyles:{fillColor:[8,145,178],textColor:255,fontStyle:'bold',fontSize:8},
+    alternateRowStyles:{fillColor:[240,249,255]},
+    columnStyles:{
+      0:{cellWidth:30}, 1:{cellWidth:28}, 2:{cellWidth:24},
+      3:{cellWidth:28}, 4:{cellWidth:22}, 5:{cellWidth:20},
+      6:{cellWidth:34}, 7:{cellWidth:34}, 8:{cellWidth:18}
+    },
+    didDrawCell:function(d){
+      if(d.column.index===8 && d.cell.section==='body'){
+        var status=(d.cell.raw||'').toLowerCase();
+        var colors={approved:[16,185,129],pending:[245,158,11],rejected:[239,68,68],expired:[100,116,139]};
+        if(colors[status]){
+          doc.setTextColor.apply(doc,colors[status]);
+          doc.setFontSize(7.5);
+          doc.text(d.cell.raw,d.cell.x+d.cell.width/2,d.cell.y+d.cell.height/2,{align:'center',baseline:'middle'});
+        }
+      }
+    }
+  });
+
+  var pageCount = doc.internal.getNumberOfPages();
+  for(var i=1;i<=pageCount;i++){
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(150);
+    doc.text('SecurityPass \u00b7 Page '+i+' of '+pageCount,
+      doc.internal.pageSize.width/2, doc.internal.pageSize.height-8,
+      {align:'center'});
+  }
+
+  var date2 = new Date().toISOString().slice(0,10);
+  doc.save('SecurityPass_'+label+'_'+date2+'.pdf');
+  toast('PDF downloaded — '+data.length+' passes');
+}
+
 async function passesPage(){
   var m=$('main-area'); if(!m)return;
   m.innerHTML='<div style="padding:60px;text-align:center;color:var(--muted)">Loading passes…</div>';
@@ -1203,7 +1322,17 @@ async function passesPage(){
   const ca=['admin','approver'].includes(role);
   $('main-area').innerHTML=`<div class="page-header fade">
     <div><h1 class="page-title">Security Passes</h1><p class="page-sub">${list.length} passes · ${baseList.filter(p=>p.status==='pending').length} pending</p></div>
-    <button class="btn bp" onclick="go('request')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>New Pass</button>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn-export-excel" onclick="exportPassesExcel()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Excel
+      </button>
+      <button class="btn-export-pdf" onclick="exportPassesPDF()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        PDF
+      </button>
+      <button class="btn bp" onclick="go('request')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>New Pass</button>
+    </div>
   </div>
   <div class="page-content fade">
     <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap;align-items:center">
@@ -2522,8 +2651,8 @@ function closeCameraModal(){
 }
 /* ─── ADMIN: USER MANAGEMENT ─────────────────── */
 let editingUser = null;
-const deptOptions = ['Engineering','Procurement','Facilities','HR','Admin','Finance','Legal','Operations','IT','Sales','Marketing','Security'];
-const roleOptions = ['approver','admin','gate'];
+var departments = []; // loaded from API
+const roleOptions = ['approver','admin','gate','visitor'];
 const colorPalette = ['#0891b2','#10b981','#f59e0b','#3b82f6','#ef4444','#06b6d4','#22d3ee','#ec4899','#f97316','#14b8a6'];
 
 async function adminPage(filterRole, filterDept){
@@ -2534,8 +2663,12 @@ async function adminPage(filterRole, filterDept){
   filterRole = filterRole || '';
   filterDept = filterDept || '';
   try {
-    var r = await apiFetch('GET','/users');
+    var [r, rd] = await Promise.all([
+      apiFetch('GET','/users'),
+      departments.length ? Promise.resolve(null) : apiFetch('GET','/departments').catch(function(){ return null; })
+    ]);
     staffUsers = (r.data||[]).map(mapUser);
+    if(rd && rd.data) departments = rd.data;
   } catch(e){ toast('Failed to load users','err'); }
 
   // Unique departments for filter
@@ -2600,6 +2733,7 @@ async function adminPage(filterRole, filterDept){
           '<div style="display:flex;gap:6px">' +
             '<button class="btn bo" style="padding:5px 12px;font-size:12px" onclick="showUserModal(\'' + u.id + '\')">Edit</button>' +
             '<button class="btn ' + btnClass + '" style="padding:5px 12px;font-size:12px" onclick="toggleUserStatus(\'' + u.id + '\')">' + btnLabel + '</button>' +
+            '<button class="btn bd" style="padding:5px 12px;font-size:12px" onclick="deleteUser(\'' + u.id + '\',\'' + u.name.replace(/'/g,"\\'") + '\')">Delete</button>' +
           '</div>' +
         '</td>' +
         '</tr>';
@@ -2704,119 +2838,134 @@ async function toggleUserStatus(id){
 function showUserModal(id){
   var u = id ? staffUsers.find(function(x){ return x.id === id; }) : null;
   editingUser = u || null;
-
-  // Remove existing modal
   var existing = document.getElementById('user-modal');
   if(existing) existing.remove();
 
-  // Build role options
   var roleOpts = roleOptions.map(function(r){
-    return '<option value="' + r + '"' + (u && u.role===r ? ' selected' : '') + '>' +
-      r.charAt(0).toUpperCase() + r.slice(1) + '</option>';
+    return '<option value="'+r+'"'+(u && u.role===r?' selected':'')+'>'+r.charAt(0).toUpperCase()+r.slice(1)+'</option>';
   }).join('');
 
-  // Build dept options
-  var deptOpts = deptOptions.map(function(d){
-    return '<option value="' + d + '"' + (u && u.dept===d ? ' selected' : '') + '>' + d + '</option>';
+  // Build dept options from API-loaded departments; fall back to user's current dept
+  var deptList = departments.length
+    ? departments
+    : (u && u.dept ? [{id:'', name:u.dept}] : [{id:'', name:'Engineering'}]);
+  var deptOpts = deptList.map(function(d){
+    var sel = u && (u.dept===d.name) ? ' selected' : '';
+    return '<option value="'+(d.id||d.name)+'"'+sel+'>'+d.name+'</option>';
   }).join('');
-
 
   var overlay = document.createElement('div');
   overlay.id = 'user-modal';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box';
+  overlay.onclick = function(e){ if(e.target===overlay) overlay.remove(); };
 
   var box = document.createElement('div');
   box.style.cssText = 'background:#fff;border-radius:16px;padding:28px;width:100%;max-width:500px;box-shadow:0 24px 60px rgba(0,0,0,.3);max-height:90vh;overflow-y:auto';
   box.innerHTML =
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:22px">' +
-      '<h3 style="font-size:17px;font-family:var(--font-head)">' + (u ? 'Edit User' : 'Add New User') + '</h3>' +
-      '<button onclick="document.getElementById(\'user-modal\').remove()" style="background:none;border:none;cursor:pointer;color:var(--muted);display:flex;align-items:center;padding:4px">' +
-        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
-      '</button>' +
-    '</div>' +
-    '<div style="display:flex;flex-direction:column;gap:14px">' +
-      '<div class="fg"><label class="fl">Full Name *</label>' +
-        '<input id="um-name" value="' + (u ? u.name : '') + '" placeholder="e.g. Priya Sharma"/></div>' +
-      '<div class="form-row">' +
-        '<div class="fg"><label class="fl">Email *</label>' +
-          '<input id="um-email" type="email" value="' + (u ? u.email : '') + '" placeholder="priya@company.com"/></div>' +
-        '<div class="fg"><label class="fl">Contact Number</label>' +
-          '<input id="um-phone" type="tel" value="' + (u ? (u.phone||'') : '') + '" placeholder="+91 98000 00000"/></div>' +
-      '</div>' +
-      '<div class="form-row">' +
-        '<div class="fg"><label class="fl">Department *</label>' +
-          '<select id="um-dept">' + deptOpts + '</select></div>' +
-        '<div class="fg"><label class="fl">Designation</label>' +
-          '<input id="um-desig" value="' + (u ? (u.designation||'') : '') + '" placeholder="e.g. Senior Manager"/></div>' +
-      '</div>' +
-      '<div class="fg"><label class="fl">Role *</label>' +
-        '<select id="um-role">' + roleOpts + '</select></div>' +
-
-    '</div>' +
-    '<div style="display:flex;gap:10px;margin-top:22px">' +
-      '<button class="btn bo" style="flex:1;justify-content:center" onclick="document.getElementById(\'user-modal\').remove()">Cancel</button>' +
-      '<button class="btn bp" style="flex:1;justify-content:center" onclick="saveUser()">' + (u ? 'Save Changes' : 'Add User') + '</button>' +
+      '<h3 style="font-size:17px;font-family:var(--font-head)">'+(u?'Edit User':'Add New User')+'</h3>' +
+      '<button onclick="document.getElementById(\'user-modal\').remove()" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px">'+
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'+
+      '</button>'+
+    '</div>'+
+    '<div style="display:flex;flex-direction:column;gap:14px">'+
+      '<div class="fg"><label class="fl">Full Name *</label>'+
+        '<input id="um-name" value="'+(u?u.name:'')+'" placeholder="e.g. Priya Sharma"/></div>'+
+      '<div class="form-row">'+
+        '<div class="fg"><label class="fl">Email *</label>'+
+          '<input id="um-email" type="email" value="'+(u?u.email:'')+'" '+(u?'readonly style="background:var(--surf)"':'')+' placeholder="priya@company.com"/></div>'+
+        '<div class="fg"><label class="fl">Contact Number</label>'+
+          '<input id="um-phone" type="tel" value="'+(u?(u.phone||''):'')+'" placeholder="+91 98000 00000"/></div>'+
+      '</div>'+
+      '<div class="form-row">'+
+        '<div class="fg"><label class="fl">Department</label>'+
+          '<select id="um-dept">'+deptOpts+'</select></div>'+
+        '<div class="fg"><label class="fl">Designation</label>'+
+          '<input id="um-desig" value="'+(u?(u.designation||''):'')+'" placeholder="e.g. Senior Manager"/></div>'+
+      '</div>'+
+      '<div class="fg"><label class="fl">Role *</label>'+
+        '<select id="um-role">'+roleOpts+'</select></div>'+
+      (!u ?
+        '<div class="fg"><label class="fl">Password *</label>'+
+          '<input id="um-pass" type="password" placeholder="Min 6 characters"/></div>'
+      : '')+
+    '</div>'+
+    '<div id="um-err" style="color:var(--red);font-size:12.5px;margin-top:10px;display:none"></div>'+
+    '<div style="display:flex;gap:10px;margin-top:22px">'+
+      '<button class="btn bo" style="flex:1;justify-content:center" onclick="document.getElementById(\'user-modal\').remove()">Cancel</button>'+
+      '<button class="btn bp" style="flex:1;justify-content:center" id="um-save-btn" onclick="saveUser()">'+(u?'Save Changes':'Add User')+'</button>'+
     '</div>';
 
   overlay.appendChild(box);
   document.body.appendChild(overlay);
+  setTimeout(function(){ var f=document.getElementById('um-name'); if(f) f.focus(); }, 50);
 }
 
-function selectAvatarColor(c){
-  var el = document.getElementById('um-color');
-  if(el) el.value = c;
-  document.querySelectorAll('[id^="avc-"]').forEach(function(el){
-    el.style.border = '3px solid transparent';
-  });
-  var swatch = document.getElementById('avc-' + c.replace('#',''));
-  if(swatch) swatch.style.border = '3px solid var(--navy)';
-}
-
-function saveUser(){
+async function saveUser(){
   var nameEl  = document.getElementById('um-name');
   var emailEl = document.getElementById('um-email');
   var roleEl  = document.getElementById('um-role');
   var deptEl  = document.getElementById('um-dept');
-  var colorEl = document.getElementById('um-color');
-  if(!nameEl || !emailEl){ toast('Form not found','err'); return; }
-  var name  = (nameEl.value  || '').trim();
-  var email = (emailEl.value || '').trim();
-  var r     = roleEl  ? roleEl.value  : 'approver';
-  var dept  = deptEl  ? deptEl.value  : 'Admin';
   var phoneEl = document.getElementById('um-phone');
   var desigEl = document.getElementById('um-desig');
-  var phone   = phoneEl ? (phoneEl.value||'').trim() : '';
-  var desig   = desigEl ? (desigEl.value||'').trim() : '';
-  // auto-assign colour based on position in array
-  var color = editingUser ? editingUser.color : colorPalette[staffUsers.length % colorPalette.length];
-  if(!name || !email){ toast('Name and email are required', 'err'); return; }
-  var initial = name.split(' ').map(function(w){ return w[0]; }).join('').substring(0,2).toUpperCase();
-  if(editingUser){
-    editingUser.name        = name;
-    editingUser.email       = email;
-    editingUser.phone       = phone;
-    editingUser.designation = desig;
-    editingUser.role        = r;
-    editingUser.dept        = dept;
-    editingUser.initial     = initial;
-    toast(name + ' updated successfully');
-  } else {
-    var newUserId='u-'+Date.now();
-    var defaultPwd=name.split(' ')[0].toLowerCase()+'@123';
-    staffUsers.push({id:newUserId,name:name,email:email,phone:phone,designation:desig,
-      role:r,dept:dept,color:color,initial:initial,active:true,password:defaultPwd});
-    notifications.unshift({
-      id:'n-'+Date.now(),event:'pass_approved',
-      title:'Your SecurityPass account has been created',
-      message:'Welcome '+name+'! Email: '+email+' | Password: '+defaultPwd+' (change on first login)',
-      pass_id:null,status:'unread',created_at:new Date().toISOString(),target_user_id:newUserId
-    });
-    renderNav();
-    toast(name+' added — credentials: '+email+' / '+defaultPwd);
+  var passEl  = document.getElementById('um-pass');
+  var errEl   = document.getElementById('um-err');
+  var saveBtn = document.getElementById('um-save-btn');
+
+  var name  = (nameEl  ? nameEl.value  : '').trim();
+  var email = (emailEl ? emailEl.value : '').trim();
+  var r     = roleEl   ? roleEl.value  : 'approver';
+  var deptVal = deptEl ? deptEl.value  : '';
+  var phone = (phoneEl ? phoneEl.value : '').trim();
+  var desig = (desigEl ? desigEl.value : '').trim();
+  var pass  = passEl   ? passEl.value  : '';
+
+  function showErr(msg){ if(errEl){ errEl.textContent=msg; errEl.style.display=''; } }
+  function hideErr(){ if(errEl) errEl.style.display='none'; }
+
+  if(!name)  { showErr('Full name is required'); return; }
+  if(!email) { showErr('Email is required'); return; }
+  if(!editingUser && (!pass || pass.length < 6)){ showErr('Password must be at least 6 characters'); return; }
+  hideErr();
+
+  // Resolve dept: if value looks like a UUID use as department_id, else find by name
+  var dept_id = null;
+  if(deptVal) {
+    var deptMatch = departments.find(function(d){ return d.id===deptVal || d.name===deptVal; });
+    if(deptMatch) dept_id = deptMatch.id || null;
   }
-  var modal = document.getElementById('user-modal');
-  if(modal) modal.remove();
-  adminPage();
+
+  if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Saving…'; }
+  try {
+    if(editingUser){
+      await apiFetch('PATCH','/users/'+editingUser.id, {
+        name, phone:phone||undefined, role:r,
+        department_id:dept_id||undefined, designation:desig||undefined
+      });
+      toast(name+' updated successfully');
+    } else {
+      await apiFetch('POST','/users', {
+        name, email, password:pass, phone:phone||undefined, role:r,
+        department_id:dept_id||undefined, designation:desig||undefined
+      });
+      toast(name+' added — login: '+email+' / '+pass);
+    }
+    var modal = document.getElementById('user-modal');
+    if(modal) modal.remove();
+    adminPage();
+  } catch(e){
+    showErr(e.message||'Failed to save user');
+    if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent=(editingUser?'Save Changes':'Add User'); }
+  }
+}
+
+async function deleteUser(id, name){
+  if(!confirm('Delete user "'+name+'"?\n\nThis is permanent and cannot be undone.')) return;
+  try {
+    await apiFetch('DELETE','/users/'+id);
+    toast(name+' deleted');
+    adminPage();
+  } catch(e){ toast(e.message||'Failed to delete user','err'); }
 }
 
 

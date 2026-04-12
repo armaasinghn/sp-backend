@@ -2,6 +2,7 @@
  * Users Controller — Profile + Admin user management
  */
 const bcrypt  = require('bcryptjs');
+const { v4: uuidv4 } = require('uuid');
 const multer  = require('multer');
 const path    = require('path');
 const fs      = require('fs');
@@ -110,6 +111,82 @@ exports.changePassword = async (req, res, next) => {
 };
 
 // ── ADMIN — USER MANAGEMENT ──────────────────────────────────
+
+/** POST /api/users  (admin only) — create a new staff/visitor user */
+exports.createUser = async (req, res, next) => {
+  try {
+    const { name, email, phone, role, department_id, designation, password } = req.body;
+    if (!name || !email || !role || !password) {
+      return badRequest(res, 'Name, email, role and password are required');
+    }
+    const validRoles = ['admin', 'approver', 'gate', 'visitor'];
+    if (!validRoles.includes(role)) return badRequest(res, 'Invalid role');
+
+    const dup = await query(`SELECT id FROM users WHERE email = $1`, [email.toLowerCase().trim()]);
+    if (dup.rows.length) return badRequest(res, 'Email already in use');
+
+    const hash = await bcrypt.hash(password, parseInt(process.env.BCRYPT_ROUNDS || '12'));
+    const id = uuidv4();
+    const initial = name.trim().split(/\s+/).map(w => w[0]).join('').substring(0, 2).toUpperCase();
+    const colors = ['#0891b2','#10b981','#f59e0b','#3b82f6','#ef4444','#06b6d4','#8b5cf6','#ec4899'];
+    const color = colors[Math.floor(Math.random() * colors.length)];
+
+    const { rows } = await query(
+      `INSERT INTO users (id, email, password_hash, name, phone, role, department_id, designation, initial, color, is_active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,TRUE)
+       RETURNING id, email, name, phone, role, designation, initial, color, is_active, created_at`,
+      [id, email.toLowerCase().trim(), hash, name.trim(), phone||null, role, department_id||null, designation||null, initial, color]
+    );
+    await auditLog({ userId: req.user.id, userName: req.user.name,
+      action: 'USER_CREATED', entityType: 'user', entityId: id,
+      newValues: { name, email, role }, ipAddress: req.ip });
+    return success(res, rows[0], 'User created successfully');
+  } catch (err) { next(err); }
+};
+
+/** PATCH /api/users/:id  (admin only) — update name/phone/role/dept/designation */
+exports.updateUser = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { name, phone, role, department_id, designation } = req.body;
+    const validRoles = ['admin', 'approver', 'gate', 'visitor'];
+    if (role && !validRoles.includes(role)) return badRequest(res, 'Invalid role');
+
+    const { rows } = await query(
+      `UPDATE users SET
+         name        = COALESCE($1, name),
+         phone       = COALESCE($2, phone),
+         role        = COALESCE($3, role),
+         department_id = COALESCE($4, department_id),
+         designation = COALESCE($5, designation),
+         initial     = LEFT(UPPER(COALESCE($1, name)), 2),
+         updated_at  = NOW()
+       WHERE id = $6
+       RETURNING id, email, name, phone, role, designation, initial, color, is_active`,
+      [name||null, phone||null, role||null, department_id||null, designation||null, id]
+    );
+    if (!rows.length) return notFound(res, 'User not found');
+    await auditLog({ userId: req.user.id, userName: req.user.name,
+      action: 'USER_UPDATED', entityType: 'user', entityId: id,
+      newValues: { name, role }, ipAddress: req.ip });
+    return success(res, rows[0], 'User updated successfully');
+  } catch (err) { next(err); }
+};
+
+/** DELETE /api/users/:id  (admin only) — permanently remove a user */
+exports.deleteUser = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (id === req.user.id) return badRequest(res, 'You cannot delete your own account');
+    const { rows } = await query(`SELECT name, role FROM users WHERE id = $1`, [id]);
+    if (!rows.length) return notFound(res, 'User not found');
+    await query(`DELETE FROM users WHERE id = $1`, [id]);
+    await auditLog({ userId: req.user.id, userName: req.user.name,
+      action: 'USER_DELETED', entityType: 'user', entityId: id,
+      oldValues: { name: rows[0].name, role: rows[0].role }, ipAddress: req.ip });
+    return success(res, { id }, 'User deleted successfully');
+  } catch (err) { next(err); }
+};
 
 /** GET /api/users  (admin only) */
 exports.listAll = async (req, res, next) => {

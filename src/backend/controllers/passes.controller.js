@@ -125,6 +125,7 @@ exports.create = async (req, res, next) => {
       purpose, description, notes,
       valid_from, valid_until,
       host_user_id, photo_url,
+      companions = [], companion_count,
     } = req.body;
 
     // Look up host
@@ -152,8 +153,9 @@ exports.create = async (req, res, next) => {
          vehicle_number, vehicle_type, purpose, description, notes,
          valid_from, valid_until, host_user_id, host_name,
          department_id, department_name, photo_url,
-         requested_by_id, self_registered
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+         requested_by_id, self_registered,
+         companions, companion_count
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
        RETURNING *`,
       [
         passNumber, visitor_name, visitor_phone, visitor_email || null,
@@ -166,6 +168,8 @@ exports.create = async (req, res, next) => {
         photo_url || null,
         req.user?.id || null,
         req.user?.role === 'visitor',
+        JSON.stringify(companions || []),
+        Array.isArray(companions) ? companions.length : (companion_count || 0),
       ]
     );
     const pass = rows[0];
@@ -416,6 +420,73 @@ exports.verify = async (req, res, next) => {
       valid_until: pass.valid_until,
       status: pass.status,
       ...(!valid && { reason: pass.status !== 'approved' ? `Pass is ${pass.status}` : 'Token mismatch or pass expired' }),
+    });
+  } catch (err) { next(err); }
+};
+
+/**
+ * GET /api/passes/reports?from=&until=&status=&dept=
+ * Admin only — aggregate report with gate log join
+ */
+exports.getReport = async (req, res, next) => {
+  try {
+    const { from, until, status, dept } = req.query;
+    const params = [];
+    const conditions = [];
+
+    if (from) { params.push(from); conditions.push(`p.valid_from >= $${params.length}`); }
+    if (until) { params.push(until); conditions.push(`p.valid_until <= $${params.length}`); }
+    if (status) { params.push(status); conditions.push(`p.status = $${params.length}`); }
+    if (dept) { params.push(`%${dept}%`); conditions.push(`p.department_name ILIKE $${params.length}`); }
+
+    const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+
+    const { rows } = await query(
+      `SELECT
+         p.id, p.pass_number, p.visitor_name, p.visitor_phone, p.visitor_company,
+         p.host_name, p.department_name, p.purpose, p.status,
+         p.valid_from, p.valid_until,
+         p.companion_count,
+         p.approved_at, p.approved_by_name,
+         p.reject_reason,
+         (SELECT MIN(gl.logged_at) FROM gate_logs gl WHERE gl.pass_id = p.id AND gl.log_type = 'entry') AS first_entry,
+         (SELECT MAX(gl.logged_at) FROM gate_logs gl WHERE gl.pass_id = p.id AND gl.log_type = 'exit')  AS last_exit,
+         (SELECT COUNT(*) FROM gate_logs gl WHERE gl.pass_id = p.id AND gl.log_type = 'entry') AS entry_count,
+         (SELECT COUNT(*) FROM gate_logs gl WHERE gl.pass_id = p.id AND gl.log_type = 'exit')  AS exit_count,
+         CASE
+           WHEN (SELECT MIN(gl.logged_at) FROM gate_logs gl WHERE gl.pass_id = p.id AND gl.log_type = 'entry') IS NOT NULL
+            AND (SELECT MAX(gl.logged_at) FROM gate_logs gl WHERE gl.pass_id = p.id AND gl.log_type = 'exit')  IS NOT NULL
+           THEN EXTRACT(EPOCH FROM (
+             (SELECT MAX(gl.logged_at) FROM gate_logs gl WHERE gl.pass_id = p.id AND gl.log_type = 'exit') -
+             (SELECT MIN(gl.logged_at) FROM gate_logs gl WHERE gl.pass_id = p.id AND gl.log_type = 'entry')
+           )) / 60
+           ELSE NULL
+         END AS duration_minutes
+       FROM passes p
+       ${where}
+       ORDER BY p.created_at DESC`,
+      params
+    );
+
+    // Summary stats
+    const total = rows.length;
+    const byStatus = rows.reduce((acc, r) => { acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, {});
+    const withEntry = rows.filter(r => r.entry_count > 0).length;
+    const durations = rows.filter(r => r.duration_minutes !== null).map(r => parseFloat(r.duration_minutes));
+    const avgDuration = durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null;
+
+    return res.json({
+      success: true,
+      summary: {
+        total,
+        approved: byStatus.approved || 0,
+        pending:  byStatus.pending  || 0,
+        rejected: byStatus.rejected || 0,
+        expired:  byStatus.expired  || 0,
+        with_entry: withEntry,
+        avg_duration_minutes: avgDuration,
+      },
+      data: rows,
     });
   } catch (err) { next(err); }
 };

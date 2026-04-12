@@ -13,6 +13,7 @@ router.use(authenticate);
 
 router.get('/',                 ctrl.list);
 router.get('/visitor-lookup',   ctrl.visitorLookup);
+router.get('/reports',          authorize('admin'), ctrl.getReport);
 router.get('/:id',              ctrl.get);
 
 router.post('/',

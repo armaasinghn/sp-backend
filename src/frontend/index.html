@@ -477,6 +477,8 @@ function mapPass(p) {
     photo_url:p.photo_url||'', notes:p.notes||'',
     nat:p.govt_id_type||p.nat||'', natid:p.govt_id_number||p.natid||'',
     vehicle:p.vehicle_number||p.vehicle||'', vaddr:p.visitor_address||p.vaddr||'',
+    companions:Array.isArray(p.companions)?p.companions:(p.companions?JSON.parse(p.companions):[]),
+    companion_count:p.companion_count||0,
   };
 }
 
@@ -512,6 +514,7 @@ let selectedHost = null;
 
 let page = 'login', role = 'admin', user = {name:'',role:''};
 let detailId = null, fstatus = 'all', prevPage = 'dashboard';
+let reportData = [], reportSummary = {};
 
 /* ─── UTILS ─────────────────────────────────── */
 const $=id=>document.getElementById(id);
@@ -625,7 +628,7 @@ function sidebarHTML(){
 
 function renderPage(){
   const m=$('main-area');if(!m)return;
-  const pages={dashboard:dashPage,passes:passesPage,request:requestPage,visitors:visitorsPage,'pass-detail':passDetailPage,'my-passes':myPassesPage,notifications:notificationsPage,admin:adminPage,profile:profilePage};
+  const pages={dashboard:dashPage,passes:passesPage,reports:reportsPage,request:requestPage,visitors:visitorsPage,'pass-detail':passDetailPage,'my-passes':myPassesPage,notifications:notificationsPage,admin:adminPage,profile:profilePage};
   (pages[page]||dashPage)();
 }
 
@@ -651,7 +654,7 @@ let selR='admin';
 const defPage={admin:'dashboard',approver:'dashboard',gate:'passes',visitor:'request'};
 
 const navConf={
-  admin:    ['dashboard','passes','request','visitors','notifications','admin','profile'],
+  admin:    ['dashboard','passes','reports','request','visitors','notifications','admin','profile'],
   approver: ['dashboard','passes','request','notifications','profile'],
   gate:     ['passes','visitors','notifications','profile'],
   visitor:  ['request','my-passes','notifications','profile'],
@@ -667,6 +670,7 @@ const navDef={
   notifications: {label:'Notifications', icon:'<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>'},
   profile:       {label:'My Profile',icon:'<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'},
   admin:         {label:'User Management',icon:'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="23" y1="11" x2="17" y2="11"/><line x1="20" y1="8" x2="20" y2="14"/>'},
+  reports:       {label:'Reports',         icon:'<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>'},
 };
 
 function buildLogin(){
@@ -1199,6 +1203,295 @@ async function dashPage(){
 }
 
 
+/* ── REPORTS PAGE ────────────────────────────────── */
+var rptFrom='', rptUntil='', rptStatus='', rptDept='';
+
+function reportsPage(){
+  if(role !== 'admin'){ go('dashboard'); return; }
+  var m=$('main-area'); if(!m)return;
+  m.innerHTML=`<div class="page-header fade">
+    <div>
+      <h1 class="page-title">Reports</h1>
+      <p class="page-sub">Detailed pass activity reports with date-range filtering</p>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn bo" onclick="downloadReportExcel()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Excel
+      </button>
+      <button class="btn bo" onclick="downloadReportPDF()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        PDF
+      </button>
+    </div>
+  </div>
+  <div class="page-content fade">
+
+    <!-- Filter Card -->
+    <div class="card" style="padding:20px 24px;margin-bottom:20px">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div style="flex:1;min-width:140px">
+          <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:5px">From Date</label>
+          <input type="date" id="rpt-from" value="${rptFrom}" onchange="rptFrom=this.value"/>
+        </div>
+        <div style="flex:1;min-width:140px">
+          <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:5px">Until Date</label>
+          <input type="date" id="rpt-until" value="${rptUntil}" onchange="rptUntil=this.value"/>
+        </div>
+        <div style="flex:1;min-width:130px">
+          <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:5px">Status</label>
+          <select id="rpt-status" onchange="rptStatus=this.value">
+            <option value="" ${!rptStatus?'selected':''}>All Statuses</option>
+            <option value="approved" ${rptStatus==='approved'?'selected':''}>Approved</option>
+            <option value="pending"  ${rptStatus==='pending'?'selected':''}>Pending</option>
+            <option value="rejected" ${rptStatus==='rejected'?'selected':''}>Rejected</option>
+            <option value="expired"  ${rptStatus==='expired'?'selected':''}>Expired</option>
+          </select>
+        </div>
+        <div style="flex:2;min-width:160px">
+          <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:5px">Department</label>
+          <input type="text" id="rpt-dept" placeholder="Filter by department…" value="${rptDept}" oninput="rptDept=this.value" onkeydown="if(event.key==='Enter')generateReport()"/>
+        </div>
+        <button class="btn bp" onclick="generateReport()" style="flex-shrink:0">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          Generate
+        </button>
+      </div>
+
+      <!-- Quick range buttons -->
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+        <span style="font-size:12px;color:var(--muted);align-self:center;margin-right:4px">Quick ranges:</span>
+        ${['Today','This Week','This Month','Last Month','All Time'].map(function(l){
+          return '<button class="btn bo" style="padding:5px 12px;font-size:12px" onclick="setRptRange(\''+l+'\')">'+l+'</button>';
+        }).join('')}
+      </div>
+    </div>
+
+    <!-- Summary + Table filled by generateReport() -->
+    <div id="rpt-summary"></div>
+    <div id="rpt-table"></div>
+  </div>`;
+
+  // Auto-generate on first load if we already have data
+  if(reportData.length) renderReportSummary();
+}
+
+function setRptRange(label){
+  var now  = new Date();
+  var from = new Date();
+  var until = new Date();
+  if(label === 'Today'){
+    from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    until = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+  } else if(label === 'This Week'){
+    var day = now.getDay(); // 0=Sun
+    from  = new Date(now); from.setDate(now.getDate() - day); from.setHours(0,0,0,0);
+    until = new Date(from); until.setDate(from.getDate() + 6); until.setHours(23,59,59,999);
+  } else if(label === 'This Month'){
+    from  = new Date(now.getFullYear(), now.getMonth(), 1);
+    until = new Date(now.getFullYear(), now.getMonth()+1, 0, 23, 59, 59);
+  } else if(label === 'Last Month'){
+    from  = new Date(now.getFullYear(), now.getMonth()-1, 1);
+    until = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+  } else { // All Time
+    rptFrom=''; rptUntil='';
+    var fi=document.getElementById('rpt-from'), ui=document.getElementById('rpt-until');
+    if(fi)fi.value=''; if(ui)ui.value='';
+    generateReport(); return;
+  }
+  rptFrom  = from.toISOString().slice(0,10);
+  rptUntil = until.toISOString().slice(0,10);
+  var fi=document.getElementById('rpt-from'), ui=document.getElementById('rpt-until');
+  if(fi)fi.value=rptFrom; if(ui)ui.value=rptUntil;
+  generateReport();
+}
+
+async function generateReport(){
+  var st = document.getElementById('rpt-summary');
+  var tb = document.getElementById('rpt-table');
+  if(!st || !tb) return;
+  st.innerHTML='<div style="padding:24px;text-align:center;color:var(--muted)">Loading report…</div>';
+  tb.innerHTML='';
+  try {
+    var qs = [];
+    if(rptFrom)   qs.push('from='+encodeURIComponent(rptFrom));
+    if(rptUntil)  qs.push('until='+encodeURIComponent(rptUntil));
+    if(rptStatus) qs.push('status='+encodeURIComponent(rptStatus));
+    if(rptDept)   qs.push('dept='+encodeURIComponent(rptDept));
+    var res = await apiFetch('GET','/passes/reports'+(qs.length?'?'+qs.join('&'):''));
+    reportData    = res.data    || [];
+    reportSummary = res.summary || {};
+    renderReportSummary();
+  } catch(e){
+    st.innerHTML='<div style="padding:24px;text-align:center;color:var(--red)">'+(e.message||'Failed to load report')+'</div>';
+  }
+}
+
+function renderReportSummary(){
+  var st = document.getElementById('rpt-summary');
+  var tb = document.getElementById('rpt-table');
+  if(!st || !tb) return;
+  var s = reportSummary;
+
+  var statItems = [
+    {label:'Total Passes', val:s.total||0,       color:'var(--acc)',   bg:'var(--acc3)'},
+    {label:'Approved',     val:s.approved||0,     color:'var(--green)', bg:'var(--gl)'},
+    {label:'Pending',      val:s.pending||0,      color:'var(--amber)', bg:'var(--al)'},
+    {label:'Rejected',     val:s.rejected||0,     color:'var(--red)',   bg:'var(--rl)'},
+    {label:'Entries Logged',val:s.with_entry||0,  color:'var(--blue)',  bg:'var(--bl)'},
+    {label:'Avg Duration', val:s.avg_duration_minutes!=null?s.avg_duration_minutes+'m':'—', color:'#8b5cf6', bg:'#ede9fe'},
+  ];
+
+  st.innerHTML='<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:20px">'
+    +statItems.map(function(si){
+      return '<div class="card" style="padding:18px 16px;text-align:center">'
+        +'<div style="font-family:var(--font-head);font-size:26px;font-weight:700;color:'+si.color+'">'+si.val+'</div>'
+        +'<div style="font-size:12px;color:var(--muted);margin-top:4px">'+si.label+'</div>'
+        +'</div>';
+    }).join('')
+  +'</div>';
+
+  if(!reportData.length){
+    tb.innerHTML='<div class="card" style="padding:48px;text-align:center;color:var(--muted)">No records match the selected filters.</div>';
+    return;
+  }
+
+  tb.innerHTML='<div class="card"><div class="card-header"><span class="card-title">Results — '+reportData.length+' record'+(reportData.length!==1?'s':'')+'</span></div>'
+    +'<div class="table-wrap"><table style="min-width:1060px"><thead><tr>'
+    +'<th>Pass #</th><th>Visitor</th><th>Contact</th><th>Meeting Officer</th><th>Department</th>'
+    +'<th>Purpose</th><th>Valid From</th><th>Valid Until</th><th>Status</th>'
+    +'<th>Entries</th><th>Avg Duration</th>'
+    +'</tr></thead><tbody>'
+    +reportData.map(function(r){
+      var statusCls={approved:'badge-approved',pending:'badge-pending',rejected:'badge-rejected',expired:'badge-expired'}[r.status]||'badge-pending';
+      var dur = r.duration_minutes!=null ? Math.round(r.duration_minutes)+'m' : '—';
+      return '<tr class="row-link" onclick="goDetail(\''+r.id+'\')">'
+        +'<td><span class="code" style="font-size:12px">'+r.pass_number+'</span></td>'
+        +'<td><div style="font-weight:500">'+escHtml(r.visitor_name)+'</div>'+(r.visitor_company?'<div style="font-size:11.5px;color:var(--muted)">'+escHtml(r.visitor_company)+'</div>':'')+'</td>'
+        +'<td style="font-size:12.5px">'+escHtml(r.visitor_phone||'')+'</td>'
+        +'<td>'+escHtml(r.host_name||'')+'</td>'
+        +'<td style="font-size:12.5px;color:var(--muted)">'+escHtml(r.department_name||'—')+'</td>'
+        +'<td style="text-transform:capitalize;font-size:12.5px">'+escHtml(r.purpose||'')+'</td>'
+        +'<td style="font-size:12px;white-space:nowrap">'+fmtRpt(r.valid_from)+'</td>'
+        +'<td style="font-size:12px;white-space:nowrap">'+fmtRpt(r.valid_until)+'</td>'
+        +'<td><span class="'+statusCls+'">'+r.status+'</span></td>'
+        +'<td style="text-align:center">'+r.entry_count+'</td>'
+        +'<td style="text-align:center;color:var(--muted)">'+dur+'</td>'
+        +'</tr>';
+    }).join('')
+    +'</tbody></table></div></div>';
+}
+
+function fmtRpt(v){
+  if(!v) return '—';
+  return new Date(v).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+
+function downloadReportExcel(){
+  if(typeof XLSX === 'undefined'){ toast('Excel library not loaded yet — try again','warn'); return; }
+  if(!reportData.length){ toast('Generate a report first','warn'); return; }
+  var rows = reportData.map(function(r){
+    return {
+      'Pass #':           r.pass_number,
+      'Visitor Name':     r.visitor_name,
+      'Contact':          r.visitor_phone||'',
+      'Company':          r.visitor_company||'',
+      'Meeting Officer':  r.host_name||'',
+      'Department':       r.department_name||'',
+      'Purpose':          r.purpose||'',
+      'Status':           r.status,
+      'Valid From':       fmtRpt(r.valid_from),
+      'Valid Until':      fmtRpt(r.valid_until),
+      'Approved By':      r.approved_by_name||'',
+      'Approved At':      fmtRpt(r.approved_at),
+      'Entry Count':      parseInt(r.entry_count||0),
+      'Exit Count':       parseInt(r.exit_count||0),
+      'First Entry':      fmtRpt(r.first_entry),
+      'Last Exit':        fmtRpt(r.last_exit),
+      'Duration (min)':   r.duration_minutes!=null?Math.round(r.duration_minutes):'',
+      'Companions':       parseInt(r.companion_count||0),
+    };
+  });
+  var ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{wch:24},{wch:22},{wch:15},{wch:20},{wch:20},{wch:18},{wch:13},{wch:11},{wch:22},{wch:22},{wch:20},{wch:22},{wch:12},{wch:11},{wch:22},{wch:22},{wch:14},{wch:11}];
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Report');
+  var label = rptFrom&&rptUntil ? rptFrom+'_to_'+rptUntil : 'All';
+  XLSX.writeFile(wb, 'SecurityPass_Report_'+label+'.xlsx');
+  toast('Excel downloaded — '+reportData.length+' records');
+}
+
+function downloadReportPDF(){
+  if(!window.jspdf || !window.jspdf.jsPDF){ toast('PDF library not loaded yet — try again','warn'); return; }
+  if(!reportData.length){ toast('Generate a report first','warn'); return; }
+  var doc = new window.jspdf.jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+  var dateStr = new Date().toLocaleDateString('en-IN');
+  var rangeStr = (rptFrom || '—')+' to '+(rptUntil || '—');
+
+  doc.setFontSize(16);
+  doc.setTextColor(8,145,178);
+  doc.text('SecurityPass \u2014 Access Report',14,16);
+  doc.setFontSize(10);
+  doc.setTextColor(100);
+  doc.text('Period: '+rangeStr+(rptStatus?' \u00b7 Status: '+rptStatus:''),14,23);
+  doc.setFontSize(9);
+  doc.setTextColor(140);
+  doc.text('Total: '+reportData.length+' record'+(reportData.length!==1?'s':'')+' \u00b7 Generated: '+dateStr,14,29);
+
+  // Summary line
+  var s = reportSummary;
+  doc.setFontSize(9);
+  doc.setTextColor(60);
+  doc.text('Approved: '+s.approved+'   Pending: '+s.pending+'   Rejected: '+s.rejected+'   Entries Logged: '+s.with_entry+(s.avg_duration_minutes!=null?'   Avg Duration: '+s.avg_duration_minutes+'m':''),14,35);
+
+  var rows = reportData.map(function(r){
+    return [
+      r.pass_number, r.visitor_name, r.visitor_phone||'',
+      r.host_name||'', r.department_name||'', r.purpose||'',
+      fmtRpt(r.valid_from), fmtRpt(r.valid_until),
+      (r.status||'').toUpperCase(),
+      r.entry_count||0,
+      r.duration_minutes!=null?Math.round(r.duration_minutes)+'m':'—',
+    ];
+  });
+
+  doc.autoTable({
+    startY: 40,
+    head:[['Pass #','Visitor','Contact','Mting Officer','Department','Purpose','Valid From','Valid Until','Status','Entries','Duration']],
+    body: rows,
+    styles:{fontSize:7.5,cellPadding:2.5,overflow:'linebreak'},
+    headStyles:{fillColor:[8,145,178],textColor:255,fontStyle:'bold',fontSize:7.5},
+    alternateRowStyles:{fillColor:[240,249,255]},
+    columnStyles:{
+      0:{cellWidth:28},1:{cellWidth:26},2:{cellWidth:22},3:{cellWidth:26},4:{cellWidth:20},
+      5:{cellWidth:18},6:{cellWidth:32},7:{cellWidth:32},8:{cellWidth:16},9:{cellWidth:12},10:{cellWidth:14}
+    },
+    didDrawCell:function(d){
+      if(d.column.index===8 && d.cell.section==='body'){
+        var status=(d.cell.raw||'').toLowerCase();
+        var colors={approved:[16,185,129],pending:[245,158,11],rejected:[239,68,68],expired:[100,116,139]};
+        if(colors[status]){
+          doc.setTextColor.apply(doc,colors[status]);
+          doc.setFontSize(7);
+          doc.text(d.cell.raw,d.cell.x+d.cell.width/2,d.cell.y+d.cell.height/2,{align:'center',baseline:'middle'});
+        }
+      }
+    }
+  });
+
+  var pageCount = doc.internal.getNumberOfPages();
+  for(var i=1;i<=pageCount;i++){
+    doc.setPage(i);
+    doc.setFontSize(7.5);
+    doc.setTextColor(150);
+    doc.text('SecurityPass \u00b7 Page '+i+' of '+pageCount,
+      doc.internal.pageSize.width/2, doc.internal.pageSize.height-8, {align:'center'});
+  }
+  var label = rptFrom&&rptUntil ? rptFrom+'_to_'+rptUntil : 'All';
+  doc.save('SecurityPass_Report_'+label+'.pdf');
+  toast('PDF downloaded — '+reportData.length+' records');
+}
+
 /* ── EXPORT HELPERS ─────────────────────────────── */
 function getFilteredPasses(){
   return passes || [];
@@ -1355,7 +1648,7 @@ async function passesPage(){
         <tbody>
           ${list.map((p,i)=>`<tr class="row-link" onclick="goDetail('${p.id}')">
             <td><span class="code" style="font-size:12px;white-space:nowrap">${p.num}</span></td>
-            <td><div style="display:flex;align-items:center;gap:9px">${av(p.vname,28,avColors[i%avColors.length])}<span style="font-weight:600;color:var(--navy)">${p.vname}</span></div></td>
+            <td><div style="display:flex;align-items:center;gap:9px">${av(p.vname,28,avColors[i%avColors.length])}<span style="font-weight:600;color:var(--navy)">${p.vname}</span>${p.companion_count>0?'<span style="background:var(--acc);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:600;margin-left:4px">+'+p.companion_count+'</span>':''}</div></td>
             <td style="color:var(--slate);white-space:nowrap">${p.vphone||'—'}</td>
             <td style="font-weight:500">${p.host||'—'}</td>
             <td style="color:var(--muted)">${p.dept||'—'}</td>
@@ -1549,6 +1842,23 @@ function _renderPassDetail(p){
       +row('Address',  p.vaddr||p.address||'')
       +row('Vehicle',  p.vehicle||p.vehicle_number||'')
       +row('Govt. ID', (p.nat||p.national_id_type||'')+(p.natid||p.national_id?' · '+(p.natid||p.national_id):''))
+      +(p.companion_count>0 && p.companions && p.companions.length
+        ? '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">'
+            +'<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">'
+              +'Additional Visitors '
+              +'<span style="background:var(--acc);color:#fff;border-radius:20px;padding:2px 9px;font-size:11px;font-weight:600;margin-left:4px">+'+p.companion_count+'</span>'
+            +'</div>'
+            +p.companions.map(function(c,i){
+              return '<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">'
+                +'<div style="width:28px;height:28px;border-radius:50%;background:var(--acc3);color:var(--acc);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">'+(i+2)+'</div>'
+                +'<div>'
+                  +'<div style="font-weight:600;font-size:13.5px">'+escHtml(c.name)+'</div>'
+                  +(c.phone?'<div style="font-size:12px;color:var(--muted)">'+escHtml(c.phone)+'</div>':'')
+                +'</div>'
+              +'</div>';
+            }).join('')
+          +'</div>'
+        : '')
     +'</div>'
 
     // Gate log
@@ -1660,6 +1970,48 @@ async function gateLog(id, logType){
 }
 
 /* ─── REQUEST PASS ───────────────────────────── */
+/* ── COMPANIONS ──────────────────────────────────── */
+var companions = [];
+
+function addCompanion(){
+  if(companions.length >= 9){ toast('Maximum 9 additional visitors allowed','warn'); return; }
+  companions.push({name:'',phone:''});
+  renderCompanionRows();
+}
+function removeCompanion(idx){
+  companions.splice(idx,1);
+  renderCompanionRows();
+}
+function escHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function renderCompanionRows(){
+  var list=document.getElementById('companions-list');
+  if(!list) return;
+  if(!companions.length){
+    list.innerHTML='';
+    var sb=document.getElementById('companions-summary'); if(sb) sb.style.display='none';
+    return;
+  }
+  list.innerHTML = companions.map(function(c,i){
+    return '<div class="companion-row" style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:center;margin-bottom:8px">'+
+      '<input type="text" placeholder="Full name *" value="'+escHtml(c.name)+'" '+
+        'oninput="companions['+i+'].name=this.value;updateCompanionSummary()" style="width:100%"/>'+
+      '<input type="tel" placeholder="Phone (optional)" value="'+escHtml(c.phone)+'" '+
+        'oninput="companions['+i+'].phone=this.value" style="width:100%"/>'+
+      '<button type="button" onclick="removeCompanion('+i+')" title="Remove" '+
+        'style="background:#fee2e2;color:#ef4444;border:none;border-radius:8px;width:34px;height:34px;font-size:18px;cursor:pointer;flex-shrink:0;line-height:1">×</button>'+
+    '</div>';
+  }).join('');
+  updateCompanionSummary();
+}
+function updateCompanionSummary(){
+  var n=companions.length;
+  var el=document.getElementById('companions-summary'); if(!el) return;
+  if(!n){ el.style.display='none'; return; }
+  el.style.display='block';
+  el.textContent = '+'+n+' additional visitor'+(n>1?'s':'')+' will be added to this pass';
+}
+function resetCompanions(){ companions=[]; renderCompanionRows(); }
+
 async function requestPage(){
   if(!staffUsers.length){
     try {
@@ -1669,6 +2021,7 @@ async function requestPage(){
   }
   selectedHost = null;
   capturedPhoto = '';
+  resetCompanions();
   const now = new Date();
   const pad = n => String(n).padStart(2,'0');
   const todayMid = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T23:59`;
@@ -1738,6 +2091,19 @@ async function requestPage(){
         // Row 6: Address (full width)
         '<div class="fg"><label class="fl">Address</label>'+
           '<textarea id="vaddr" rows="2" placeholder="Street, City, State, PIN code" style="font-family:inherit;font-size:13.5px;resize:vertical"></textarea>'+
+        '</div>'+
+
+        // Additional Visitors section
+        '<div id="companions-section" style="border:1px solid var(--border);border-radius:10px;padding:14px 16px">'+
+          '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">'+
+            '<div>'+
+              '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em">Additional Visitors</div>'+
+              '<div style="font-size:12px;color:var(--muted);margin-top:2px">People entering together under this pass (optional)</div>'+
+            '</div>'+
+            '<button type="button" onclick="addCompanion()" style="background:var(--acc3);color:var(--acc);border:1.5px solid var(--acc);border-radius:8px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;font-family:var(--font-body)">+ Add Person</button>'+
+          '</div>'+
+          '<div id="companions-list"></div>'+
+          '<div id="companions-summary" style="display:none;background:var(--acc3);border-radius:8px;padding:8px 14px;font-size:13px;color:var(--acc);font-weight:500;margin-top:6px"></div>'+
         '</div>'+
 
         // Divider
@@ -1996,6 +2362,18 @@ async function submitPass(){
     toast('Invalid '+idType+' format — '+hint, 'err');
     hasErr=true;
   }
+  // Validate companions
+  for(var ci=0;ci<companions.length;ci++){
+    if(!companions[ci].name.trim()){
+      toast('Additional visitor '+(ci+1)+': name is required','err');
+      var rows=document.querySelectorAll('.companion-row');
+      if(rows[ci]){ var inp=rows[ci].querySelector('input'); if(inp){ inp.style.borderColor='var(--red)'; inp.focus(); } }
+      return;
+    }
+  }
+  var validCompanions = companions.filter(function(c){ return c.name.trim(); })
+    .map(function(c){ return {name:c.name.trim(), phone:(c.phone||'').trim()}; });
+
   if(hasErr){ return; }
   function isoFix(v){ return v && v.length===16 ? v+':00' : v; }
   try {
@@ -2015,12 +2393,15 @@ async function submitPass(){
       valid_until:isoFix(validUntil)||undefined,
       host_user_id:moSel,
       photo_url:capturedPhoto||undefined,
+      companions:validCompanions.length ? validCompanions : undefined,
+      companion_count:validCompanions.length||undefined,
     });
     passClearErrs();
     var newp = mapPass(r.data);
     passes.unshift(newp);
-    toast('Pass '+newp.num+' submitted successfully');
-    selectedHost=null; capturedPhoto='';
+    var cMsg = validCompanions.length ? ' (+'+validCompanions.length+' companion'+(validCompanions.length>1?'s':'')+')' : '';
+    toast('Pass '+newp.num+' submitted successfully'+cMsg);
+    selectedHost=null; capturedPhoto=''; resetCompanions();
     goDetail(newp.id);
   } catch(e){
     // Surface field-level errors from backend if available
@@ -2401,6 +2782,16 @@ function printSecurityPass(p){
     + (visVeh  ? '<div class="field"><div class="fl">Vehicle</div><div class="fv">' + visVeh + '</div></div>' : '')
     + (notes   ? '<div class="field" style="grid-column:1/-1"><div class="fl">Notes for Security</div><div class="fv">' + notes + '</div></div>' : '')
     + '</div>'
+
+    // Additional Visitors
+    + (p.companions && p.companions.length
+        ? '<div style="margin-top:12px;padding:10px 14px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc">'
+          + '<div style="font-size:10px;font-weight:700;color:#64748b;letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px">Additional Visitors (+'+p.companions.length+')</div>'
+          + p.companions.map(function(c,i){
+              return '<div style="font-size:12px;padding:3px 0;color:#334155">'+(i+2)+'. '+escHtml(c.name)+(c.phone?' · '+escHtml(c.phone):'')+'</div>';
+            }).join('')
+          + '</div>'
+        : '')
 
     // Dates
     + '<div class="dates">'

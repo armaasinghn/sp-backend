@@ -1813,8 +1813,8 @@ function _renderPassDetail(p){
                 : ''))
         : '')
       +(p.status==='approved'
-        ? '<button class="btn bo" onclick="downloadQR(detailId)">'
-            +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Save QR'
+        ? '<button class="btn bo" onclick="downloadGatePass(detailId)">'
+            +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Gate Pass PDF'
           +'</button>'
         : '')
     +'</div>'
@@ -1925,8 +1925,9 @@ function _renderPassDetail(p){
               +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>'
               +' Print'
             +'</button>'
-            +'<button class="btn bo" style="flex:1;justify-content:center;font-size:12px" onclick="downloadQR(detailId)">'
-              +'↓ Save QR'
+            +'<button class="btn bo" style="flex:1;justify-content:center;font-size:12px" onclick="downloadGatePass(detailId)">'
+              +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'
+              +' Gate Pass'
             +'</button>'
           +'</div>'
         : '<div style="padding:32px 16px;color:var(--muted)">'
@@ -2632,22 +2633,233 @@ async function readAndGo(id, passId){
   else { notificationsPage(); }
 }
 
-/* ─── REAL QR CODE ────────────────────────────────────── */
-function downloadQR(passId){
-  var el = document.getElementById('qr-container-'+passId);
-  if(!el) return;
-  var img = el.querySelector('img') || el.querySelector('canvas');
-  if(!img){ toast('QR not available','err'); return; }
-  var a = document.createElement('a');
-  if(img.tagName==='CANVAS'){
-    a.href = img.toDataURL('image/png');
-  } else {
-    a.href = img.src;
+/* ─── GATE PASS PDF DOWNLOAD ─────────────────────────── */
+async function downloadGatePass(passId){
+  if(!window.jspdf || !window.jspdf.jsPDF){ toast('PDF library not loaded — try again','warn'); return; }
+
+  // Find pass in local array, or fetch from API
+  var p = passes.find(function(x){ return x.id === passId; });
+  if(!p){
+    try {
+      var r = await apiFetch('GET', '/passes/'+passId);
+      p = mapPass(r.data);
+    } catch(e){ toast('Pass not found','err'); return; }
   }
-  var p = passes.find(function(x){return x.id===passId;}) || {num:'QR'};
-  a.download = p.num + '.png';
-  a.click();
-  toast('QR image downloaded');
+  if(p.status !== 'approved'){ toast('Pass must be approved to download','warn'); return; }
+  if(!p.qr_text){ toast('QR not available for this pass','warn'); return; }
+
+  toast('Generating gate pass PDF…');
+
+  // Render QR to base64 PNG
+  var qrDataUrl;
+  try { qrDataUrl = await _qrToDataURL(p.qr_text); }
+  catch(e){ toast('QR render failed — try again','err'); return; }
+
+  var doc = new window.jspdf.jsPDF({orientation:'portrait', unit:'mm', format:'a4'});
+  var W = doc.internal.pageSize.width;   // 210mm
+  var H = doc.internal.pageSize.height;  // 297mm
+  var mg = 18;
+  var y = 0;
+
+  // ── HEADER BAND ──────────────────────────────────────
+  doc.setFillColor(8, 145, 178);
+  doc.rect(0, 0, W, 30, 'F');
+
+  // Logo circle
+  doc.setFillColor(255, 255, 255, 0.15);
+  doc.setDrawColor(255, 255, 255);
+  doc.setLineWidth(0.4);
+  doc.circle(mg + 7, 15, 7, 'D');
+  doc.setFontSize(11);
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.text('SP', mg + 7, 16.5, {align:'center'});
+
+  // Title
+  doc.setFontSize(15);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(255, 255, 255);
+  doc.text('SecurityPass', mg + 18, 13);
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(224, 247, 250);
+  doc.text('ACCESS CONTROL SYSTEM', mg + 18, 20);
+
+  // Approved badge — right side of header
+  doc.setFillColor(16, 185, 129);
+  doc.roundedRect(W - mg - 34, 10, 34, 11, 2.5, 2.5, 'F');
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(255, 255, 255);
+  doc.text('\u2713 APPROVED', W - mg - 17, 17, {align:'center'});
+
+  y = 38;
+
+  // ── GATE PASS TITLE ──────────────────────────────────
+  doc.setFontSize(20);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(8, 145, 178);
+  doc.text('GATE PASS', W/2, y, {align:'center'});
+  y += 7;
+
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  doc.text(p.num || '', W/2, y, {align:'center'});
+  y += 8;
+
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.3);
+  doc.line(mg, y, W - mg, y);
+  y += 8;
+
+  // Helper: section heading
+  function sectionHead(title){
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(8, 145, 178);
+    doc.text(title, mg, y);
+    y += 6;
+  }
+
+  // Helper: label-value row
+  function detailRow(label, value){
+    if(!value) return;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text(label, mg, y);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42);
+    var lines = doc.splitTextToSize(value, W - mg - mg - 42);
+    doc.text(lines, mg + 42, y);
+    y += lines.length > 1 ? lines.length * 5.2 : 7;
+  }
+
+  // ── VISITOR DETAILS ──────────────────────────────────
+  sectionHead('VISITOR DETAILS');
+
+  detailRow('Full Name',    p.vname || '');
+  detailRow('Contact',      p.vphone || '');
+  if(p.vemail || p.email) detailRow('Email', p.vemail || p.email || '');
+  if(p.vco) detailRow('Company', p.vco);
+  if(p.vaddr) detailRow('Address', p.vaddr);
+  if(p.nat) detailRow('Govt. ID', p.nat + (p.natid ? ': ' + p.natid : ''));
+  if(p.vehicle) detailRow('Vehicle', p.vehicle);
+  if(p.companion_count > 0) detailRow('Additional Visitors', '+' + p.companion_count + ' person(s) accompanying');
+
+  y += 2;
+  doc.setDrawColor(226, 232, 240);
+  doc.line(mg, y, W - mg, y);
+  y += 8;
+
+  // ── VISIT DETAILS ────────────────────────────────────
+  sectionHead('VISIT DETAILS');
+
+  detailRow('Meeting Officer', p.host || p.approver || '');
+  detailRow('Department',      p.dept || '');
+  detailRow('Purpose',         p.purpose ? p.purpose.charAt(0).toUpperCase() + p.purpose.slice(1) : '');
+  if(p.pdet) detailRow('Description', p.pdet);
+  if(p.notes) detailRow('Notes', p.notes);
+  detailRow('Valid From',      _fmtGP(p.from));
+  detailRow('Valid Until',     _fmtGP(p.until));
+
+  y += 2;
+  doc.setDrawColor(226, 232, 240);
+  doc.line(mg, y, W - mg, y);
+  y += 8;
+
+  // ── APPROVAL DETAILS ─────────────────────────────────
+  sectionHead('APPROVAL DETAILS');
+  if(p.approved_by) detailRow('Approved By', p.approved_by);
+  if(p.approved_at) detailRow('Approved At', _fmtGP(p.approved_at));
+
+  y += 2;
+  doc.setDrawColor(226, 232, 240);
+  doc.line(mg, y, W - mg, y);
+  y += 8;
+
+  // ── QR CODE SECTION ──────────────────────────────────
+  var qrSize  = 58;
+  var boxH    = 84;
+  doc.setFillColor(240, 249, 255);
+  doc.roundedRect(mg, y, W - mg*2, boxH, 4, 4, 'F');
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(mg, y, W - mg*2, boxH, 4, 4, 'D');
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(8, 145, 178);
+  doc.text('SCAN TO VERIFY AT GATE', W/2, y + 9, {align:'center'});
+
+  var qrX = (W - qrSize) / 2;
+  doc.addImage(qrDataUrl, 'PNG', qrX, y + 13, qrSize, qrSize);
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text(p.num || '', W/2, y + boxH - 6, {align:'center'});
+
+  y += boxH + 10;
+
+  // ── FOOTER ────────────────────────────────────────────
+  var footerY = H - 18;
+  doc.setFillColor(248, 250, 252);
+  doc.rect(0, footerY - 4, W, 22, 'F');
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.3);
+  doc.line(0, footerY - 4, W, footerY - 4);
+
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(148, 163, 184);
+  doc.text(
+    'This pass is valid only for the dates shown above. Present QR at the security gate.',
+    W/2, footerY + 2, {align:'center', maxWidth: W - mg*2}
+  );
+  doc.text(
+    'SecurityPass Access Management  \u00b7  Generated: ' + _fmtGP(new Date()),
+    W/2, footerY + 9, {align:'center'}
+  );
+
+  doc.save('GatePass_' + (p.num || passId) + '.pdf');
+  toast('Gate pass PDF downloaded');
+}
+
+function _qrToDataURL(qrText){
+  return new Promise(function(resolve, reject){
+    var div = document.createElement('div');
+    div.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:300px;height:300px';
+    document.body.appendChild(div);
+    try {
+      new QRCode(div, {
+        text: qrText || 'invalid',
+        width: 300, height: 300,
+        colorDark: '#0f172a', colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.H
+      });
+      setTimeout(function(){
+        var canvas = div.querySelector('canvas');
+        var img    = div.querySelector('img');
+        var dataUrl = canvas ? canvas.toDataURL('image/png') : (img ? img.src : null);
+        document.body.removeChild(div);
+        if(dataUrl) resolve(dataUrl);
+        else reject(new Error('QR canvas not found'));
+      }, 250);
+    } catch(e){
+      try{ document.body.removeChild(div); }catch(_){}
+      reject(e);
+    }
+  });
+}
+
+function _fmtGP(val){
+  if(!val) return '';
+  return new Date(val).toLocaleString('en-IN',{
+    day:'2-digit', month:'short', year:'numeric',
+    hour:'2-digit', minute:'2-digit'
+  });
 }
 
 function renderRealQR(containerId, text, size){

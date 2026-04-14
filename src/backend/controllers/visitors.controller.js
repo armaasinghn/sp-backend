@@ -76,6 +76,23 @@ exports.selfRegister = async (req, res, next) => {
       purpose, description, valid_from, valid_until, host_user_id,
     } = req.body;
 
+    // Validate Govt. ID format if provided
+    if (govt_id_type && govt_id_number) {
+      const sanitized = govt_id_number.replace(/[\s\-]/g, '').toUpperCase();
+      const idRules = {
+        'Aadhaar':         { pattern: /^\d{12}$/ },
+        'PAN':             { pattern: /^[A-Z]{5}[0-9]{4}[A-Z]$/ },
+        'Passport':        { pattern: /^[A-Z][1-9][0-9]{7}$/ },
+        'Driving Licence': { pattern: /^[A-Z]{2}[0-9]{13}$/ },
+        'Voter ID':        { pattern: /^[A-Z]{3}[0-9]{7}$/ },
+      };
+      const rule = idRules[govt_id_type];
+      if (rule && !rule.pattern.test(sanitized)) {
+        const { badRequest } = require('../utils/response');
+        return badRequest(res, `Invalid ${govt_id_type} format`);
+      }
+    }
+
     // Duplicate checks
     const dup = await query(
       `SELECT u.id,

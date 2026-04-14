@@ -479,6 +479,7 @@ function mapPass(p) {
     vehicle:p.vehicle_number||p.vehicle||'', vaddr:p.visitor_address||p.vaddr||'',
     companions:Array.isArray(p.companions)?p.companions:(p.companions?JSON.parse(p.companions):[]),
     companion_count:p.companion_count||0,
+    preferred_gate:p.preferred_gate||'',
   };
 }
 
@@ -515,6 +516,7 @@ let selectedHost = null;
 let page = 'login', role = 'admin', user = {name:'',role:''};
 let detailId = null, fstatus = 'all', prevPage = 'dashboard';
 let reportData = [], reportSummary = {};
+let gates = [];
 
 /* ─── UTILS ─────────────────────────────────── */
 const $=id=>document.getElementById(id);
@@ -958,6 +960,8 @@ async function doLogin(){
     if(role !== 'visitor'){
       apiFetch('GET','/users').then(function(su){ staffUsers = (su.data||[]).map(mapUser); }).catch(function(){});
     }
+    // Load gates
+    apiFetch('GET','/gates').then(function(gr){ gates = gr.data||[]; }).catch(function(){});
     render();
     toast('Welcome back, '+u.name+'!');
   } catch(e) {
@@ -1359,7 +1363,7 @@ function renderReportSummary(){
   tb.innerHTML='<div class="card"><div class="card-header"><span class="card-title">Results — '+reportData.length+' record'+(reportData.length!==1?'s':'')+'</span></div>'
     +'<div class="table-wrap"><table style="min-width:1060px"><thead><tr>'
     +'<th>Pass #</th><th>Visitor</th><th>Contact</th><th>Meeting Officer</th><th>Department</th>'
-    +'<th>Purpose</th><th>Valid From</th><th>Valid Until</th><th>Status</th>'
+    +'<th>Purpose</th><th>Entry Gate</th><th>Valid From</th><th>Valid Until</th><th>Status</th>'
     +'<th>Entries</th><th>Avg Duration</th>'
     +'</tr></thead><tbody>'
     +reportData.map(function(r){
@@ -1372,6 +1376,7 @@ function renderReportSummary(){
         +'<td>'+escHtml(r.host_name||'')+'</td>'
         +'<td style="font-size:12.5px;color:var(--muted)">'+escHtml(r.department_name||'—')+'</td>'
         +'<td style="text-transform:capitalize;font-size:12.5px">'+escHtml(r.purpose||'')+'</td>'
+        +'<td>'+(r.preferred_gate?'<span style="background:var(--acc3);color:var(--acc);border-radius:6px;padding:2px 8px;font-size:12px;white-space:nowrap">'+escHtml(r.preferred_gate)+'</span>':'<span style="color:var(--muted)">—</span>')+'</td>'
         +'<td style="font-size:12px;white-space:nowrap">'+fmtRpt(r.valid_from)+'</td>'
         +'<td style="font-size:12px;white-space:nowrap">'+fmtRpt(r.valid_until)+'</td>'
         +'<td><span class="'+statusCls+'">'+r.status+'</span></td>'
@@ -1399,6 +1404,7 @@ function downloadReportExcel(){
       'Meeting Officer':  r.host_name||'',
       'Department':       r.department_name||'',
       'Purpose':          r.purpose||'',
+      'Entry Gate':       r.preferred_gate||'',
       'Status':           r.status,
       'Valid From':       fmtRpt(r.valid_from),
       'Valid Until':      fmtRpt(r.valid_until),
@@ -1448,6 +1454,7 @@ function downloadReportPDF(){
     return [
       r.pass_number, r.visitor_name, r.visitor_phone||'',
       r.host_name||'', r.department_name||'', r.purpose||'',
+      r.preferred_gate||'—',
       fmtRpt(r.valid_from), fmtRpt(r.valid_until),
       (r.status||'').toUpperCase(),
       r.entry_count||0,
@@ -1457,22 +1464,22 @@ function downloadReportPDF(){
 
   doc.autoTable({
     startY: 40,
-    head:[['Pass #','Visitor','Contact','Mting Officer','Department','Purpose','Valid From','Valid Until','Status','Entries','Duration']],
+    head:[['Pass #','Visitor','Contact','Mting Officer','Department','Purpose','Gate','Valid From','Valid Until','Status','Entries','Duration']],
     body: rows,
-    styles:{fontSize:7.5,cellPadding:2.5,overflow:'linebreak'},
-    headStyles:{fillColor:[8,145,178],textColor:255,fontStyle:'bold',fontSize:7.5},
+    styles:{fontSize:7,cellPadding:2.2,overflow:'linebreak'},
+    headStyles:{fillColor:[8,145,178],textColor:255,fontStyle:'bold',fontSize:7},
     alternateRowStyles:{fillColor:[240,249,255]},
     columnStyles:{
-      0:{cellWidth:28},1:{cellWidth:26},2:{cellWidth:22},3:{cellWidth:26},4:{cellWidth:20},
-      5:{cellWidth:18},6:{cellWidth:32},7:{cellWidth:32},8:{cellWidth:16},9:{cellWidth:12},10:{cellWidth:14}
+      0:{cellWidth:26},1:{cellWidth:24},2:{cellWidth:20},3:{cellWidth:24},4:{cellWidth:18},
+      5:{cellWidth:16},6:{cellWidth:18},7:{cellWidth:28},8:{cellWidth:28},9:{cellWidth:14},10:{cellWidth:10},11:{cellWidth:12}
     },
     didDrawCell:function(d){
-      if(d.column.index===8 && d.cell.section==='body'){
+      if(d.column.index===9 && d.cell.section==='body'){
         var status=(d.cell.raw||'').toLowerCase();
         var colors={approved:[16,185,129],pending:[245,158,11],rejected:[239,68,68],expired:[100,116,139]};
         if(colors[status]){
           doc.setTextColor.apply(doc,colors[status]);
-          doc.setFontSize(7);
+          doc.setFontSize(6.5);
           doc.text(d.cell.raw,d.cell.x+d.cell.width/2,d.cell.y+d.cell.height/2,{align:'center',baseline:'middle'});
         }
       }
@@ -1519,6 +1526,7 @@ function exportPassesExcel(){
       'Meeting Officer': p.host,
       'Department':      p.dept,
       'Purpose':         p.purpose,
+      'Entry Gate':      p.preferred_gate||'',
       'Valid From':      fmtExport(p.from),
       'Valid Until':     fmtExport(p.until),
       'Status':          p.status,
@@ -1640,6 +1648,7 @@ async function passesPage(){
               <th>Meeting Officer</th>
               <th>Department</th>
               <th>Purpose</th>
+              <th>Entry Gate</th>
               <th>Valid From</th>
               <th>Valid Until</th>
               <th>Status</th>
@@ -1653,6 +1662,7 @@ async function passesPage(){
             <td style="font-weight:500">${p.host||'—'}</td>
             <td style="color:var(--muted)">${p.dept||'—'}</td>
             <td><span class="tag" style="text-transform:capitalize;white-space:nowrap">${p.purpose||'—'}</span></td>
+            <td>${p.preferred_gate?`<span style="background:var(--acc3);color:var(--acc);border-radius:6px;padding:3px 9px;font-size:12px;font-weight:500;white-space:nowrap">${p.preferred_gate}</span>`:'<span style="color:var(--muted)">—</span>'}</td>
             <td style="font-size:12.5px;color:var(--slate);white-space:nowrap">${fdts(p.from)}</td>
             <td style="font-size:12.5px;color:var(--slate);white-space:nowrap">${fdts(p.until)}</td>
             <td>${badge(p.status)}</td>
@@ -1873,6 +1883,17 @@ function _renderPassDetail(p){
     +'<div class="card" style="padding:20px">'
       +'<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:14px">Visit Details</div>'
       +row('Purpose',    (p.purpose||'').charAt(0).toUpperCase()+(p.purpose||'').slice(1))
+      +(p.preferred_gate
+        ? '<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border)">'
+            +'<span style="width:120px;font-size:12.5px;color:var(--muted);flex-shrink:0">Entry Gate</span>'
+            +'<span style="font-weight:600;color:var(--navy)">'
+              +'<span style="background:var(--acc3);color:var(--acc);border-radius:6px;padding:3px 11px;font-size:12.5px;font-weight:600">'
+                +'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="vertical-align:middle;margin-right:4px"><rect x="3" y="2" width="7" height="20" rx="1"/><path d="M21 12H11"/><path d="M16 7l5 5-5 5"/></svg>'
+                +escHtml(p.preferred_gate)
+              +'</span>'
+            +'</span>'
+          +'</div>'
+        : '')
       +row('Description',p.pdet||p.purpose_details||'')
       +row('Valid From', fdts(p.from||p.valid_from||''))
       +row('Valid Until',fdts(p.until||p.valid_until||''))
@@ -1964,8 +1985,10 @@ function _renderPassDetail(p){
 /* ─── GATE LOG ───────────────────────────────── */
 async function gateLog(id, logType){
   try {
-    await apiFetch('POST','/passes/'+id+'/gate-log',{log_type:logType,gate_name:'Main Gate'});
-    toast(logType==='entry'?'Entry logged successfully':'Exit logged successfully');
+    var p = passes.find(function(x){ return x.id===id; });
+    var gn = (p && p.preferred_gate) ? p.preferred_gate : 'Main Gate';
+    await apiFetch('POST','/passes/'+id+'/gate-log',{log_type:logType,gate_name:gn});
+    toast(logType==='entry'?'Entry logged at '+gn:'Exit logged at '+gn);
     goDetail(id);
   } catch(e){ toast(e.message||'Failed to log gate activity','err'); }
 }
@@ -2076,10 +2099,24 @@ async function requestPage(){
         // Row 4: ID Type + ID Number
         '<div class="form-row">'+
           '<div class="fg"><label class="fl">Govt. ID Type</label>'+
-            '<select id="vit" onchange="onVitChange(this.value)"><option>Aadhaar</option><option>Passport</option><option>Driving Licence</option><option>Voter ID</option><option>PAN</option></select>'+
+            '<select id="vit" onchange="onVitChange(this.value)">'+
+              '<option value="">— Select ID type —</option>'+
+              '<option>Aadhaar</option><option>PAN</option><option>Passport</option><option>Driving Licence</option><option>Voter ID</option>'+
+            '</select>'+
           '</div>'+
-          '<div class="fg"><label class="fl">Govt. ID Number</label><input id="vi" placeholder="12-digit number" oninput="passFieldClear(\'vi\')"/></div>'+
-        '</div>'+
+          '<div class="fg">'+
+            '<label class="fl">Govt. ID Number</label>'+
+            '<input id="vi" placeholder="Select ID type first" maxlength="16"/>'+
+            '<div style="display:flex;justify-content:space-between;margin-top:4px;min-height:16px">'+
+              '<div id="vi-err" style="font-size:11.5px;display:none;font-weight:500"></div>'+
+              '<div id="vi-cnt" style="font-size:11px;color:var(--muted);margin-left:auto"></div>'+
+            '</div>'+
+          '</div>'+
+        '</div>'+(function(){
+          // Wire validator after DOM insertion — use setTimeout 0
+          setTimeout(function(){ makeIdValidator('vit','vi','vi-err','vi-cnt'); },0);
+          return '';
+        })()+
 
         // Row 5: Vehicle Number + Vehicle Type
         '<div class="form-row">'+
@@ -2129,7 +2166,23 @@ async function requestPage(){
           '</div>'+
         '</div>'+
 
-        // Row 8: Description — full width, stretched
+        // Row 8: Entry Gate
+        '<div class="form-row">'+
+          '<div class="fg">'+
+            '<label class="fl">Entry Gate *</label>'+
+            '<select id="entry-gate" onchange="passFieldClear(\'entry-gate\')" style="font-size:13.5px">'+
+              '<option value="">— Select Entry Gate —</option>'+
+              (gates.length
+                ? gates.map(function(g){ return '<option value="'+escHtml(g.name)+'">'+escHtml(g.name)+'</option>'; }).join('')
+                : '<option value="Main Gate">Main Gate</option><option value="Gate 2">Gate 2</option><option value="Gate 3">Gate 3</option><option value="Visitor Gate">Visitor Gate</option>'
+              )+
+            '</select>'+
+            '<div style="font-size:11.5px;color:var(--muted);margin-top:4px">Gate where the visitor will check in</div>'+
+          '</div>'+
+          '<div class="fg"></div>'+
+        '</div>'+
+
+        // Row 9: Description — full width, stretched
         '<div class="fg"><label class="fl">Description / Agenda</label>'+
           '<textarea id="pdet" rows="3" placeholder="Describe the purpose, agenda, items to be delivered, etc." style="font-family:inherit;font-size:13.5px;resize:vertical"></textarea>'+
         '</div>'+
@@ -2314,7 +2367,7 @@ function passFieldErr(id, msg){
 }
 function passClearErrs(){
   document.querySelectorAll('.field-err-msg').forEach(function(e){ e.remove(); });
-  ['vn','vp','ve','pp','mo-select','pvf','pvu','vi'].forEach(function(id){
+  ['vn','vp','ve','pp','mo-select','entry-gate','pvf','pvu','vi'].forEach(function(id){
     var el = document.getElementById(id);
     if(el){ el.style.borderColor = ''; el.style.boxShadow = ''; }
   });
@@ -2327,19 +2380,178 @@ function passFieldClear(id){
   var msg = wrap && wrap.querySelector('.field-err-msg');
   if(msg) msg.remove();
 }
-var idRules = {
-  'Aadhaar':         { pattern: /^\d{12}$/, hint: '12-digit number' },
-  'Passport':        { pattern: /^[A-Z][1-9]\d{7}$/i, hint: 'e.g. A1234567' },
-  'Driving Licence': { pattern: /^[A-Z]{2}\d{2}\s?\d{11}$/i, hint: 'e.g. DL0120110012345' },
-  'Voter ID':        { pattern: /^[A-Z]{3}\d{7}$/i, hint: 'e.g. ABC1234567' },
-  'PAN':             { pattern: /^[A-Z]{5}\d{4}[A-Z]$/i, hint: 'e.g. ABCDE1234F' },
+/* ── GOVT ID VALIDATION ─────────────────────────────── */
+var GOVT_ID_RULES = {
+  'Aadhaar': {
+    pattern:   /^\d{12}$/,
+    maxLength: 12, minLength: 12,
+    hint:      '12-digit number',
+    example:   '234567890123',
+    sanitize:  function(v){ return v.replace(/[\s\-]/g,''); },
+    errorMsg:  'Aadhaar must be exactly 12 digits',
+    checksum:  true,
+  },
+  'PAN': {
+    pattern:   /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/,
+    maxLength: 10, minLength: 10,
+    hint:      '10 chars: 5 letters, 4 digits, 1 letter',
+    example:   'ABCDE1234F',
+    sanitize:  function(v){ return v.toUpperCase().replace(/\s/g,''); },
+    errorMsg:  'PAN must be 10 characters (e.g. ABCDE1234F)',
+    checksum:  false,
+  },
+  'Passport': {
+    pattern:   /^[A-Z][1-9][0-9]{7}$/,
+    maxLength: 9, minLength: 9,
+    hint:      '1 letter + 8 digits (e.g. A12345678)',
+    example:   'A12345678',
+    sanitize:  function(v){ return v.toUpperCase().replace(/\s/g,''); },
+    errorMsg:  'Passport: 1 letter followed by 8 digits (e.g. A12345678)',
+    checksum:  false,
+  },
+  'Driving Licence': {
+    pattern:   /^[A-Z]{2}[0-9]{13}$/,
+    maxLength: 16, minLength: 15,
+    hint:      'State + year + 11 digits (e.g. DL0120110012345)',
+    example:   'DL0120110012345',
+    sanitize:  function(v){ return v.toUpperCase().replace(/[\s\-]/g,''); },
+    errorMsg:  'Driving Licence must be 15 chars (e.g. DL0120110012345)',
+    checksum:  false,
+  },
+  'Voter ID': {
+    pattern:   /^[A-Z]{3}[0-9]{7}$/,
+    maxLength: 10, minLength: 10,
+    hint:      '3 letters + 7 digits (e.g. ABC1234567)',
+    example:   'ABC1234567',
+    sanitize:  function(v){ return v.toUpperCase().replace(/\s/g,''); },
+    errorMsg:  'Voter ID must be 10 chars: 3 letters + 7 digits',
+    checksum:  false,
+  },
 };
-function onVitChange(type){
-  var rule = idRules[type];
-  var inp = document.getElementById('vi');
-  if(inp) inp.placeholder = rule ? rule.hint : 'ID number';
-  passFieldClear('vi');
+
+function verhoeffCheck(num){
+  var d=[[0,1,2,3,4,5,6,7,8,9],[1,2,3,4,0,6,7,8,9,5],[2,3,4,0,1,7,8,9,5,6],[3,4,0,1,2,8,9,5,6,7],[4,0,1,2,3,9,5,6,7,8],[5,9,8,7,6,0,4,3,2,1],[6,5,9,8,7,1,0,4,3,2],[7,6,5,9,8,2,1,0,4,3],[8,7,6,5,9,3,2,1,0,4],[9,8,7,6,5,4,3,2,1,0]];
+  var p=[[0,1,2,3,4,5,6,7,8,9],[1,5,7,6,2,8,3,0,9,4],[5,8,0,3,7,9,6,1,4,2],[8,9,1,6,0,4,3,5,2,7],[9,4,5,3,1,2,6,8,7,0],[4,2,8,6,5,7,3,9,0,1],[2,7,9,3,8,0,6,4,1,5],[7,0,4,6,9,1,3,2,5,8]];
+  var c=0, digits=String(num).split('').reverse().map(Number);
+  for(var i=0;i<digits.length;i++) c=d[c][p[i%8][digits[i]]];
+  return c===0;
 }
+
+function validateGovtId(idType, rawValue){
+  if(!idType || !rawValue || !rawValue.trim()) return {valid:true, warning:null};
+  var rule = GOVT_ID_RULES[idType];
+  if(!rule) return {valid:true, warning:null};
+  var s = rule.sanitize(rawValue);
+  if(s.length > rule.maxLength)
+    return {valid:false, error:idType+' cannot exceed '+rule.maxLength+' characters (you entered '+s.length+')'};
+  if(s.length < rule.minLength)
+    return {valid:false, error:idType+' must be '+rule.minLength+' characters (you entered '+s.length+')'};
+  if(!rule.pattern.test(s))
+    return {valid:false, error:rule.errorMsg+' · Example: '+rule.example};
+  if(rule.checksum && !verhoeffCheck(s))
+    return {valid:true, warning:'This Aadhaar number appears invalid — please double-check'};
+  return {valid:true, warning:null};
+}
+
+/* Factory: wire real-time ID validation to a type-select + number-input pair */
+function makeIdValidator(typeSelId, inputId, errId, cntId){
+  function getEl(id){ return document.getElementById(id); }
+  function showErr(msg){
+    var inp=getEl(inputId), err=getEl(errId);
+    if(inp){ inp.style.borderColor='#ef4444'; inp.style.boxShadow='0 0 0 3px rgba(239,68,68,.15)'; }
+    if(err){ err.style.display='block'; err.style.color='#ef4444'; err.textContent='\u2715 '+msg; }
+  }
+  function showWarn(msg){
+    var inp=getEl(inputId), err=getEl(errId);
+    if(inp){ inp.style.borderColor='#f59e0b'; inp.style.boxShadow='0 0 0 3px rgba(245,158,11,.15)'; }
+    if(err){ err.style.display='block'; err.style.color='#f59e0b'; err.textContent='\u26a0 '+msg; }
+  }
+  function showOk(){
+    var inp=getEl(inputId), err=getEl(errId);
+    if(inp){ inp.style.borderColor='#10b981'; inp.style.boxShadow='0 0 0 3px rgba(16,185,129,.15)'; }
+    if(err){ err.style.display='block'; err.style.color='#10b981'; err.textContent='\u2713 Valid format'; }
+  }
+  function clearState(){
+    var inp=getEl(inputId), err=getEl(errId), cnt=getEl(cntId);
+    if(inp){ inp.style.borderColor=''; inp.style.boxShadow=''; }
+    if(err){ err.style.display='none'; err.textContent=''; }
+    if(cnt){ cnt.textContent=''; }
+  }
+  function updateCounter(s, rule){
+    var cnt=getEl(cntId); if(!cnt||!rule) return;
+    cnt.textContent=s.length+' / '+rule.maxLength;
+    cnt.style.color=s.length===rule.maxLength?'#10b981':s.length>rule.maxLength?'#ef4444':'var(--muted)';
+  }
+
+  var typeSel = getEl(typeSelId);
+  var inp = getEl(inputId);
+  if(!typeSel || !inp) return;
+
+  typeSel.addEventListener('change', function(){
+    var rule = GOVT_ID_RULES[this.value];
+    inp.value = '';
+    inp.maxLength = rule ? rule.maxLength + 2 : 50;
+    inp.placeholder = rule ? rule.hint : 'ID number';
+    clearState();
+  });
+
+  inp.addEventListener('input', function(){
+    var idType = typeSel.value;
+    var rule = GOVT_ID_RULES[idType];
+    if(!rule){ clearState(); return; }
+
+    // Auto-uppercase for non-Aadhaar
+    if(idType !== 'Aadhaar'){
+      var pos = this.selectionStart;
+      this.value = this.value.toUpperCase();
+      try{ this.setSelectionRange(pos,pos); }catch(_){}
+    }
+
+    // Aadhaar: digits only, auto-space every 4
+    if(idType === 'Aadhaar'){
+      var digits = this.value.replace(/\D/g,'').slice(0,12);
+      this.value = digits.replace(/(\d{4})(\d{0,4})(\d{0,4})/,'$1 $2 $3').replace(/\s+$/,'').trim();
+      if(this.value.replace(/\s/g,'').length===12) this.value=this.value.trimEnd();
+    }
+
+    var s = rule.sanitize(this.value);
+    updateCounter(s, rule);
+    if(s.length >= rule.minLength){
+      var res = validateGovtId(idType, this.value);
+      if(!res.valid) showErr(res.error);
+      else if(res.warning) showWarn(res.warning);
+      else showOk();
+    } else {
+      clearState();
+      if(s.length > 0) updateCounter(s, rule);
+    }
+  });
+
+  inp.addEventListener('blur', function(){
+    if(!this.value.trim()){ clearState(); return; }
+    var res = validateGovtId(typeSel.value, this.value);
+    if(!res.valid) showErr(res.error);
+    else if(res.warning) showWarn(res.warning);
+    else showOk();
+  });
+}
+
+function onVitChange(type){
+  var rule = GOVT_ID_RULES[type];
+  var inp = document.getElementById('vi');
+  if(inp){
+    inp.placeholder = rule ? rule.hint : 'ID number';
+    inp.maxLength   = rule ? rule.maxLength + 2 : 50;
+    inp.value = '';
+  }
+  passFieldClear('vi');
+  var err=document.getElementById('vi-err'), cnt=document.getElementById('vi-cnt');
+  if(err){ err.style.display='none'; err.textContent=''; }
+  if(cnt){ cnt.textContent=''; }
+}
+
+/* Legacy alias kept for backward compatibility */
+var idRules = GOVT_ID_RULES;
 async function submitPass(){
   passClearErrs();
   var name  = ($('vn')||{}).value||'';
@@ -2351,17 +2563,25 @@ async function submitPass(){
   var hasErr = false;
   if(!name.trim()){ passFieldErr('vn','Full name is required'); hasErr=true; }
   if(!phone.trim()){ passFieldErr('vp','Contact number is required'); hasErr=true; }
+  var gateVal = ($('entry-gate')||{}).value||'';
   if(!moSel){ passFieldErr('mo-select','Please select a Meeting Officer'); hasErr=true; }
   if(!purp){ passFieldErr('pp','Please select the purpose of visit'); hasErr=true; }
+  if(!gateVal){ passFieldErr('entry-gate','Please select an entry gate'); hasErr=true; }
   if(!validFrom){ passFieldErr('pvf','Valid From date is required'); hasErr=true; }
   if(!validUntil){ passFieldErr('pvu','Valid Until date is required'); hasErr=true; }
   var idType = ($('vit')||{}).value||'';
   var idNum  = (($('vi')||{}).value||'').trim();
-  if(idNum && idRules[idType] && !idRules[idType].pattern.test(idNum)){
-    var hint = idRules[idType].hint;
-    passFieldErr('vi', 'Invalid '+idType+' — '+hint);
-    toast('Invalid '+idType+' format — '+hint, 'err');
-    hasErr=true;
+  if(idNum){
+    var idRes = validateGovtId(idType, idNum);
+    if(!idRes.valid){
+      passFieldErr('vi', idRes.error);
+      var errEl = document.getElementById('vi-err');
+      if(errEl){ errEl.style.display='block'; errEl.style.color='#ef4444'; errEl.textContent='\u2715 '+idRes.error; }
+      toast(idRes.error, 'err');
+      hasErr=true;
+    } else if(idRes.warning){
+      toast(idRes.warning, 'warn');
+    }
   }
   // Validate companions
   for(var ci=0;ci<companions.length;ci++){
@@ -2384,7 +2604,7 @@ async function submitPass(){
       visitor_company:($('vc')||{}).value||undefined,
       visitor_address:($('vaddr')||{}).value||undefined,
       govt_id_type:($('vit')||{}).value||undefined,
-      govt_id_number:($('vi')||{}).value||undefined,
+      govt_id_number:(function(){ var t=($('vit')||{}).value; var v=($('vi')||{}).value||''; var r=GOVT_ID_RULES[t]; return r?r.sanitize(v):(v||undefined); })()||undefined,
       vehicle_number:($('vvn')||{}).value||undefined,
       vehicle_type:($('vvt')||{}).value||undefined,
       purpose:purp.toLowerCase(),
@@ -2396,6 +2616,7 @@ async function submitPass(){
       photo_url:capturedPhoto||undefined,
       companions:validCompanions.length ? validCompanions : undefined,
       companion_count:validCompanions.length||undefined,
+      preferred_gate:gateVal||undefined,
     });
     passClearErrs();
     var newp = mapPass(r.data);
@@ -2756,6 +2977,7 @@ async function downloadGatePass(passId){
   // ── VISIT DETAILS ────────────────────────────────────
   sectionHead('VISIT DETAILS');
 
+  if(p.preferred_gate) detailRow('Entry Gate', p.preferred_gate);
   detailRow('Meeting Officer', p.host || p.approver || '');
   detailRow('Department',      p.dept || '');
   detailRow('Purpose',         p.purpose ? p.purpose.charAt(0).toUpperCase() + p.purpose.slice(1) : '');
@@ -2799,7 +3021,14 @@ async function downloadGatePass(passId){
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);
-  doc.text(p.num || '', W/2, y + boxH - 6, {align:'center'});
+  doc.text(p.num || '', W/2, y + boxH - 11, {align:'center'});
+
+  if(p.preferred_gate){
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text('Entry Gate: ' + p.preferred_gate, W/2, y + boxH - 4, {align:'center'});
+  }
 
   y += boxH + 10;
 
@@ -3782,6 +4011,9 @@ async function buildRegisterPage(){
       '</div>' +
     '</div>';
 
+  // Wire ID validator for register form
+  makeIdValidator('rg-idtype','rg-idnum','rg-id-err','rg-id-cnt');
+
   // Set min dates
   var now = new Date();
   var pad = function(n){ return String(n).padStart(2,'0'); };
@@ -3838,11 +4070,15 @@ function buildRegFormHTML(){
       '</div>' +
       '<div class="reg-row">' +
         '<div class="fg"><label class="fl">Govt. ID Type *</label>' +
-          '<select id="rg-idtype"><option value="">Select ID type</option>' +
+          '<select id="rg-idtype" onchange="(function(){ var r=GOVT_ID_RULES[this.value]; var inp=document.getElementById(\'rg-idnum\'); if(inp){ inp.value=\'\'; inp.placeholder=r?r.hint:\'ID number\'; inp.maxLength=r?r.maxLength+2:50; } var e=document.getElementById(\'rg-id-err\'),c=document.getElementById(\'rg-id-cnt\'); if(e){e.style.display=\'none\';e.textContent=\'\';} if(c){c.textContent=\'\';} if(inp){inp.style.borderColor=\'\';inp.style.boxShadow=\'\';} }).call(this)"><option value="">Select ID type</option>' +
           '<option>Aadhaar</option><option>PAN</option><option>Passport</option><option>Driving Licence</option><option>Voter ID</option>' +
           '</select></div>' +
         '<div class="fg"><label class="fl">Govt. ID Number *</label>' +
-          '<input id="rg-idnum" placeholder="ID number" oninput="regDupCheck()"/>' +
+          '<input id="rg-idnum" placeholder="Select ID type first" maxlength="16" oninput="regDupCheck()"/>' +
+          '<div style="display:flex;justify-content:space-between;margin-top:4px;min-height:16px">' +
+            '<div id="rg-id-err" style="font-size:11.5px;display:none;font-weight:500"></div>' +
+            '<div id="rg-id-cnt" style="font-size:11px;color:var(--muted);margin-left:auto"></div>' +
+          '</div>' +
           '<div class="dup-warn" id="dup-id"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> ID already registered</div>' +
         '</div>' +
       '</div>' +
@@ -3983,6 +4219,10 @@ async function submitRegister(){
   if(!pwd || pwd.length<6){ err('Password must be at least 6 characters.'); return; }
   if(pwd !== pwd2){ err('Passwords do not match.'); return; }
   if(!idtype || !idnum){ err('Government ID type and number are required.'); return; }
+  var idValidRes = validateGovtId(idtype, idnum);
+  if(!idValidRes.valid){ err(idValidRes.error); return; }
+  // Warning: show but don't block
+  if(idValidRes.warning){ toast(idValidRes.warning, 'warn'); }
   if(!moId){ err('Please select a Meeting Officer.'); return; }
   if(!purp){ err('Please select the purpose of your visit.'); return; }
   if(!from || !until){ err('Please select visit start and end date/time.'); return; }
@@ -3991,7 +4231,8 @@ async function submitRegister(){
     var r = await apiFetch('POST','/visitors/register',{
       name, email, phone, password:pwd,
       company:co||undefined, address:addr||undefined,
-      govt_id_type:idtype||undefined, govt_id_number:idnum||undefined,
+      govt_id_type:idtype||undefined,
+      govt_id_number:(function(){ var r=GOVT_ID_RULES[idtype]; return r?r.sanitize(idnum):idnum; })()||undefined,
       vehicle_number:vnum||undefined, vehicle_type:vtype||undefined,
       purpose:purp, description:desc||undefined, valid_from:from, valid_until:until,
       host_user_id:moId,
@@ -4476,6 +4717,14 @@ async function init(){
           var su = await apiFetch('GET','/users');
           staffUsers = (su.data||[]).map(mapUser);
         } catch(e){}
+      }
+      // Load gates (all roles may request a pass)
+      try {
+        var gr = await apiFetch('GET','/gates');
+        gates = gr.data || [];
+      } catch(e){}
+      if(!gates.length){
+        gates = [{id:1,name:'Main Gate'},{id:2,name:'Gate 2'},{id:3,name:'Gate 3'},{id:4,name:'Visitor Gate'}];
       }
       page = defPage[role] || 'dashboard';
       render();

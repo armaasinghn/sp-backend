@@ -9,6 +9,7 @@ router.use('/passes',        require('./passes.routes'));
 router.use('/visitors',      require('./visitors.routes'));
 router.use('/users',         require('./users.routes'));
 router.use('/notifications', require('./notifications.routes'));
+router.use('/gates',         require('./gates.routes'));
 
 // Health check
 router.get('/health', (req, res) => res.json({

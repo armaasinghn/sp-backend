@@ -126,7 +126,25 @@ exports.create = async (req, res, next) => {
       valid_from, valid_until,
       host_user_id, photo_url,
       companions = [], companion_count,
+      preferred_gate = null,
     } = req.body;
+
+    // Validate Govt. ID format if provided
+    if (govt_id_type && govt_id_number) {
+      const sanitized = govt_id_number.replace(/[\s\-]/g, '').toUpperCase();
+      const idRules = {
+        'Aadhaar':         { len: 12, pattern: /^\d{12}$/ },
+        'PAN':             { len: 10, pattern: /^[A-Z]{5}[0-9]{4}[A-Z]$/ },
+        'Passport':        { len: 9,  pattern: /^[A-Z][1-9][0-9]{7}$/ },
+        'Driving Licence': { len: 15, pattern: /^[A-Z]{2}[0-9]{13}$/ },
+        'Voter ID':        { len: 10, pattern: /^[A-Z]{3}[0-9]{7}$/ },
+      };
+      const rule = idRules[govt_id_type];
+      if (rule && !rule.pattern.test(sanitized)) {
+        await client.query('ROLLBACK');
+        return badRequest(res, `Invalid ${govt_id_type} format`);
+      }
+    }
 
     // Look up host
     const hostResult = await client.query(
@@ -154,8 +172,9 @@ exports.create = async (req, res, next) => {
          valid_from, valid_until, host_user_id, host_name,
          department_id, department_name, photo_url,
          requested_by_id, self_registered,
-         companions, companion_count
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+         companions, companion_count,
+         preferred_gate
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
        RETURNING *`,
       [
         passNumber, visitor_name, visitor_phone, visitor_email || null,
@@ -170,6 +189,7 @@ exports.create = async (req, res, next) => {
         req.user?.role === 'visitor',
         JSON.stringify(companions || []),
         Array.isArray(companions) ? companions.length : (companion_count || 0),
+        preferred_gate || null,
       ]
     );
     const pass = rows[0];
@@ -446,7 +466,7 @@ exports.getReport = async (req, res, next) => {
          p.id, p.pass_number, p.visitor_name, p.visitor_phone, p.visitor_company,
          p.host_name, p.department_name, p.purpose, p.status,
          p.valid_from, p.valid_until,
-         p.companion_count,
+         p.companion_count, p.preferred_gate,
          p.approved_at, p.approved_by_name,
          p.reject_reason,
          (SELECT MIN(gl.logged_at) FROM gate_logs gl WHERE gl.pass_id = p.id AND gl.log_type = 'entry') AS first_entry,

@@ -630,7 +630,7 @@ function sidebarHTML(){
 
 function renderPage(){
   const m=$('main-area');if(!m)return;
-  const pages={dashboard:dashPage,passes:passesPage,reports:reportsPage,request:requestPage,visitors:visitorsPage,'pass-detail':passDetailPage,'my-passes':myPassesPage,notifications:notificationsPage,admin:adminPage,profile:profilePage};
+  const pages={dashboard:dashPage,passes:passesPage,reports:reportsPage,request:requestPage,visitors:visitorsPage,'pass-detail':passDetailPage,'my-passes':myPassesPage,notifications:notificationsPage,admin:adminPage,profile:profilePage,'gate-in':gateInPage,'gate-out':gateOutPage};
   (pages[page]||dashPage)();
 }
 
@@ -653,12 +653,12 @@ const roleConf={
 };
 let selR='admin';
 
-const defPage={admin:'dashboard',approver:'dashboard',gate:'passes',visitor:'request'};
+const defPage={admin:'dashboard',approver:'dashboard',gate:'gate-in',visitor:'request'};
 
 const navConf={
   admin:    ['dashboard','passes','reports','request','visitors','notifications','admin','profile'],
   approver: ['dashboard','passes','request','notifications','profile'],
-  gate:     ['passes','visitors','notifications','profile'],
+  gate:     ['gate-in','gate-out','passes','visitors','notifications','profile'],
   visitor:  ['request','my-passes','notifications','profile'],
 };
 
@@ -673,6 +673,8 @@ const navDef={
   profile:       {label:'My Profile',icon:'<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'},
   admin:         {label:'User Management',icon:'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="23" y1="11" x2="17" y2="11"/><line x1="20" y1="8" x2="20" y2="14"/>'},
   reports:       {label:'Reports',         icon:'<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>'},
+  'gate-in':     {label:'Gate In',         icon:'<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>'},
+  'gate-out':    {label:'Gate Out',        icon:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>'},
 };
 
 function buildLogin(){
@@ -987,10 +989,11 @@ async function dashPage(){
     try{
       var insJson = await apiFetch('GET','/visitors/inside');
       insideList = (insJson.data||[]).map(function(v){
-        return {name:v.visitor_name||'', co:v.company||'', host:v.host_name||'',
+        return {name:v.visitor_name||'', co:v.visitor_company||v.company||'', host:v.host_name||'',
                 pass:v.pass_number||'', gate:v.gate_name||'Main Gate',
                 since:v.entry_time ? new Date(v.entry_time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : '',
-                mins:v.duration_minutes||0};
+                mins:v.minutes_inside?Math.round(v.minutes_inside):(v.duration_minutes||0),
+                passId:v.pass_id||''};
       });
       inside = insideList;
     }catch(e2){ insideList=inside; }
@@ -1187,7 +1190,12 @@ async function dashPage(){
         `<div class="card" style="padding:18px 20px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
             <span class="card-title">Currently Inside</span>
-            ${insideList.length>0?`<span class="inside-badge"><span class="pulse-dot" style="background:var(--acc)"></span>${insideList.length} live</span>`:''}
+            <div style="display:flex;align-items:center;gap:8px">
+              ${insideList.length>0?`<span class="inside-badge"><span class="pulse-dot" style="background:var(--acc)"></span>${insideList.length} live</span>`:''}
+              <button onclick="refreshInsidePanel()" title="Refresh" style="background:none;border:none;cursor:pointer;padding:4px;color:var(--muted);display:flex;align-items:center;border-radius:6px" onmouseover="this.style.color='var(--acc)';this.style.background='var(--acc3)'" onmouseout="this.style.color='var(--muted)';this.style.background='none'">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              </button>
+            </div>
           </div>
           ${insideHTML}
         </div>`}
@@ -2380,6 +2388,256 @@ function passFieldClear(id){
   var msg = wrap && wrap.querySelector('.field-err-msg');
   if(msg) msg.remove();
 }
+/* ── GATE IN / GATE OUT ──────────────────────────────── */
+var _gSelId   = null;   // currently selected pass ID in gate flow
+var _gateEligible = []; // passes available for gate-in
+var _gateInside   = []; // passes currently inside (for gate-out)
+
+/* Helper: build coloured avatar initials */
+function _gAv(name, size){
+  var c = avColors[Math.abs(name.split('').reduce(function(h,ch){ return h*31+ch.charCodeAt(0); },0)) % avColors.length];
+  return '<div style="width:'+size+'px;height:'+size+'px;border-radius:50%;background:'+c+';display:flex;align-items:center;justify-content:center;font-size:'+(size/2.5)+'px;font-weight:700;color:#fff;flex-shrink:0;font-family:var(--font-head)">'+escHtml((name||'?').charAt(0).toUpperCase())+'</div>';
+}
+
+/* Build a pass card row for the selection list */
+function _gPassRow(p, mode){
+  var sel = _gSelId === p.id;
+  var since = '';
+  if(mode === 'out' && p.entry_time){
+    var mins = Math.round((Date.now() - new Date(p.entry_time).getTime()) / 60000);
+    since = ' · <span style="color:var(--green);font-weight:600">'+mins+' min inside</span>';
+  }
+  return '<div id="grow-'+p.id+'" onclick="_gSelect(\''+p.id+'\',\''+mode+'\')" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:10px;cursor:pointer;transition:all .15s;border:2px solid '+(sel?'var(--acc)':'transparent')+';background:'+(sel?'var(--acc3)':'var(--white)')+';margin-bottom:4px">'
+    +_gAv(p.visitor_name||p.vname||'', 38)
+    +'<div style="flex:1;min-width:0">'
+      +'<div style="font-weight:600;font-size:14px;color:var(--navy)">'+escHtml(p.visitor_name||p.vname||'')+'</div>'
+      +'<div style="font-size:12px;color:var(--muted);margin-top:1px">'+escHtml(p.visitor_company||p.vco||'Individual')+' · '+escHtml(p.host_name||p.host||'')+since+'</div>'
+    +'</div>'
+    +'<div style="text-align:right;flex-shrink:0">'
+      +'<div style="font-size:11.5px;font-family:monospace;color:var(--acc);font-weight:600">'+escHtml(p.pass_number||p.num||'')+'</div>'
+      +(p.preferred_gate||p.gate_name?'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+escHtml(p.preferred_gate||p.gate_name||'')+'</div>':'')
+    +'</div>'
+  +'</div>';
+}
+
+/* Build the confirmation detail panel */
+function _gDetailPanel(p, mode){
+  var gateOpts = gates.length
+    ? gates.map(function(g){ return '<option value="'+escHtml(g.name)+'"'+(p.preferred_gate===g.name?' selected':'')+'>'+escHtml(g.name)+'</option>'; }).join('')
+    : '<option>Main Gate</option><option>Gate 2</option><option>Gate 3</option><option>Visitor Gate</option>';
+
+  var companions = '';
+  if((p.companion_count||0) > 0){
+    companions = '<div style="margin-top:10px;padding:10px 12px;background:var(--surf);border-radius:8px;border:1px solid var(--border)">'
+      +'<span style="font-size:12px;font-weight:600;color:var(--muted)">+'+p.companion_count+' additional visitor'+(p.companion_count>1?'s':'')+'</span>'
+    +'</div>';
+  }
+
+  var entryInfo = '';
+  if(mode === 'out' && p.entry_time){
+    var mins = Math.round((Date.now() - new Date(p.entry_time).getTime()) / 60000);
+    entryInfo = '<div style="margin-top:10px;padding:10px 12px;background:var(--gl);border-radius:8px;border:1px solid var(--green)">'
+      +'<div style="font-size:12px;font-weight:600;color:var(--gtx)">Entered via '+escHtml(p.gate_name||'Main Gate')+' at '+new Date(p.entry_time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})+'</div>'
+      +'<div style="font-size:11.5px;color:var(--gtx);margin-top:2px">Time inside: <strong>'+mins+' min</strong></div>'
+    +'</div>';
+  }
+
+  return '<div class="card" style="padding:20px">'
+    +'<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:14px">'+(mode==='in'?'Confirm Gate In':'Confirm Gate Out')+'</div>'
+
+    // Visitor header
+    +'<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)">'
+      +_gAv(p.visitor_name||p.vname||'', 44)
+      +'<div>'
+        +'<div style="font-size:16px;font-weight:700;color:var(--navy)">'+escHtml(p.visitor_name||p.vname||'')+'</div>'
+        +'<div style="font-size:12.5px;color:var(--muted)">'+escHtml(p.visitor_company||p.vco||'Individual visitor')+'</div>'
+      +'</div>'
+    +'</div>'
+
+    // Details grid
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;font-size:13px">'
+      +'<div><span style="color:var(--muted)">Pass #</span><br/><span style="font-weight:600;font-family:monospace;color:var(--acc)">'+escHtml(p.pass_number||p.num||'')+'</span></div>'
+      +'<div><span style="color:var(--muted)">Purpose</span><br/><span style="font-weight:500;text-transform:capitalize">'+escHtml(p.purpose||'')+'</span></div>'
+      +'<div><span style="color:var(--muted)">Meeting</span><br/><span style="font-weight:500">'+escHtml(p.host_name||p.host||'')+'</span></div>'
+      +'<div><span style="color:var(--muted)">Visitors</span><br/><span style="font-weight:500">'+(1+(p.companion_count||0))+' person'+(1+(p.companion_count||0)>1?'s':'')+'</span></div>'
+    +'</div>'
+
+    +companions
+    +entryInfo
+
+    // Gate selector
+    +'<div style="margin-top:14px">'
+      +'<label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:5px">Entry Gate</label>'
+      +'<select id="ggate-'+mode+'" style="width:100%;font-size:13.5px">'+gateOpts+'</select>'
+    +'</div>'
+
+    // Action buttons
+    +'<div style="display:flex;gap:8px;margin-top:16px">'
+      +(mode==='in'
+        ? '<button class="btn bp" style="flex:1;justify-content:center" onclick="_gConfirm(\'in\',\''+p.id+'\')">'
+            +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>'
+            +' Confirm Gate In'
+          +'</button>'
+        : '<button class="btn bd" style="flex:1;justify-content:center" onclick="_gConfirm(\'out\',\''+p.id+'\')">'
+            +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>'
+            +' Confirm Gate Out'
+          +'</button>'
+      )
+      +'<button class="btn bo" style="padding:9px 14px" onclick="_gSelId=null;'+(mode==='in'?'gateInPage':'gateOutPage')+'()">'
+        +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
+      +'</button>'
+    +'</div>'
+  +'</div>';
+}
+
+function _gSelect(passId, mode){
+  _gSelId = passId;
+  mode === 'in' ? gateInPage() : gateOutPage();
+}
+
+async function gateInPage(){
+  if(role !== 'gate' && role !== 'admin'){ go('passes'); return; }
+  var m = $('main-area'); if(!m) return;
+  m.innerHTML = '<div style="padding:60px;text-align:center;color:var(--muted)">Loading…</div>';
+  try {
+    var r = await apiFetch('GET','/passes/gate-eligible');
+    _gateEligible = r.data || [];
+  } catch(e) {
+    m.innerHTML = '<div style="padding:40px;text-align:center;color:var(--red)">Failed to load: '+(e.message||'Error')+'</div>';
+    return;
+  }
+
+  var selPass = _gSelId ? _gateEligible.find(function(p){ return p.id===_gSelId; }) : null;
+  var listHTML = _gateEligible.length
+    ? _gateEligible.map(function(p){ return _gPassRow(p,'in'); }).join('')
+    : '<div style="padding:32px;text-align:center;color:var(--muted);font-size:13.5px">No approved passes awaiting entry</div>';
+
+  m.innerHTML = '<div class="page-header fade">'
+    +'<div><h1 class="page-title">Gate In</h1><p class="page-sub">'+_gateEligible.length+' pass'+((_gateEligible.length!==1)?'es':'')+' awaiting entry</p></div>'
+    +'<button class="btn bo" onclick="gateInPage()" title="Refresh">'
+      +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>'
+      +' Refresh'
+    +'</button>'
+  +'</div>'
+  +'<div class="page-content fade" style="display:grid;grid-template-columns:1fr '+(selPass?'340px':'0px')+';gap:20px;align-items:start">'
+    +'<div class="card" style="padding:8px">'+listHTML+'</div>'
+    +(selPass
+      ? '<div style="position:sticky;top:20px">'+_gDetailPanel(selPass,'in')+'</div>'
+      : '<div></div>')
+  +'</div>';
+}
+
+async function gateOutPage(){
+  if(role !== 'gate' && role !== 'admin'){ go('passes'); return; }
+  var m = $('main-area'); if(!m) return;
+  m.innerHTML = '<div style="padding:60px;text-align:center;color:var(--muted)">Loading…</div>';
+  try {
+    var r = await apiFetch('GET','/passes/currently-inside');
+    _gateInside = r.data || [];
+  } catch(e) {
+    m.innerHTML = '<div style="padding:40px;text-align:center;color:var(--red)">Failed to load: '+(e.message||'Error')+'</div>';
+    return;
+  }
+
+  // Normalise field names from v_currently_inside view
+  _gateInside = _gateInside.map(function(v){
+    return {
+      id: v.pass_id,
+      pass_number: v.pass_number,
+      visitor_name: v.visitor_name,
+      visitor_company: v.visitor_company,
+      host_name: v.host_name,
+      gate_name: v.gate_name,
+      entry_time: v.entry_time,
+      companion_count: 0,
+      purpose: '',
+      preferred_gate: v.gate_name,
+    };
+  });
+
+  var selPass = _gSelId ? _gateInside.find(function(p){ return p.id===_gSelId; }) : null;
+  var listHTML = _gateInside.length
+    ? _gateInside.map(function(p){ return _gPassRow(p,'out'); }).join('')
+    : '<div style="padding:32px;text-align:center;color:var(--muted);font-size:13.5px">No visitors currently inside</div>';
+
+  m.innerHTML = '<div class="page-header fade">'
+    +'<div><h1 class="page-title">Gate Out</h1><p class="page-sub">'+_gateInside.length+' visitor'+(_gateInside.length!==1?'s':'')+' currently inside</p></div>'
+    +'<button class="btn bo" onclick="gateOutPage()" title="Refresh">'
+      +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>'
+      +' Refresh'
+    +'</button>'
+  +'</div>'
+  +'<div class="page-content fade" style="display:grid;grid-template-columns:1fr '+(selPass?'340px':'0px')+';gap:20px;align-items:start">'
+    +'<div class="card" style="padding:8px">'+listHTML+'</div>'
+    +(selPass
+      ? '<div style="position:sticky;top:20px">'+_gDetailPanel(selPass,'out')+'</div>'
+      : '<div></div>')
+  +'</div>';
+}
+
+async function _gConfirm(mode, passId){
+  var logType  = mode === 'in' ? 'entry' : 'exit';
+  var gateEl   = document.getElementById('ggate-'+mode);
+  var gateName = gateEl ? gateEl.value : 'Main Gate';
+
+  // Disable button to prevent double-click
+  var btns = document.querySelectorAll('button[onclick*="_gConfirm"]');
+  btns.forEach(function(b){ b.disabled=true; b.textContent='Processing…'; });
+
+  try {
+    var r = await apiFetch('POST', '/passes/'+passId+'/gate-log', {
+      log_type: logType,
+      gate_name: gateName,
+    });
+
+    var durStr = (r.data && r.data.duration_mins != null) ? r.data.duration_mins+' min inside' : '';
+
+    // Rebuild inside[] from DB so dashboard is live
+    try {
+      var insR = await apiFetch('GET','/visitors/inside');
+      inside = (insR.data||[]).map(function(v){
+        return {
+          name:v.visitor_name||'', co:v.visitor_company||'', host:v.host_name||'',
+          pass:v.pass_number||'', gate:v.gate_name||'Main Gate',
+          since:v.entry_time?new Date(v.entry_time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):'',
+          mins:v.minutes_inside?Math.round(v.minutes_inside):0,
+          passId:v.pass_id,
+        };
+      });
+    } catch(_){}
+
+    if(mode === 'in'){
+      toast('\u2713 Gate In — '+gateName+' logged');
+    } else {
+      toast('\u2713 Gate Out' + (durStr?' · '+durStr:'') + ' — logged');
+    }
+
+    _gSelId = null;
+    mode === 'in' ? gateInPage() : gateOutPage();
+
+  } catch(e){
+    toast((e.message||'Gate log failed'), 'err');
+    btns.forEach(function(b){ b.disabled=false; b.textContent=mode==='in'?'Confirm Gate In':'Confirm Gate Out'; });
+  }
+}
+
+/* Dashboard refresh for Currently Inside */
+async function refreshInsidePanel(){
+  try {
+    var r = await apiFetch('GET','/visitors/inside');
+    inside = (r.data||[]).map(function(v){
+      return {
+        name:v.visitor_name||'', co:v.visitor_company||'', host:v.host_name||'',
+        pass:v.pass_number||'', gate:v.gate_name||'Main Gate',
+        since:v.entry_time?new Date(v.entry_time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):'',
+        mins:v.minutes_inside?Math.round(v.minutes_inside):0,
+        passId:v.pass_id,
+      };
+    });
+    dashPage();
+  } catch(e){ toast('Failed to refresh','err'); }
+}
+
 /* ── GOVT ID VALIDATION ─────────────────────────────── */
 var GOVT_ID_RULES = {
   'Aadhaar': {

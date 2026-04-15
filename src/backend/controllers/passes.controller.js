@@ -351,16 +351,43 @@ exports.gateLog = async (req, res, next) => {
       return badRequest(res, 'Pass has expired');
     }
 
+    // Check last log to prevent double-entry and orphaned exits
+    const { rows: lastRows } = await client.query(
+      `SELECT log_type, logged_at FROM gate_logs WHERE pass_id = $1
+       ORDER BY logged_at DESC LIMIT 1`,
+      [id]
+    );
+    const lastType = lastRows[0]?.log_type || null;
+
+    if (log_type === 'entry' && lastType === 'entry') {
+      return badRequest(res, 'Visitor is already inside — log exit first');
+    }
+    if (log_type === 'exit' && lastType !== 'entry') {
+      return badRequest(res, 'No active entry found — log entry first');
+    }
+
+    // Calculate duration for exit
+    let durationMins = null;
+    if (log_type === 'exit' && lastRows[0]) {
+      durationMins = Math.max(0, Math.round(
+        (Date.now() - new Date(lastRows[0].logged_at).getTime()) / 60000
+      ));
+    }
+
     await client.query('BEGIN');
 
     const { rows } = await client.query(
       `INSERT INTO gate_logs (pass_id, log_type, gate_name, logged_by_id, logged_by_name, remarks)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [id, log_type, gate_name, req.user.id, req.user.name, remarks || null]
+      [id, log_type, gate_name, req.user.id, req.user.name,
+       durationMins !== null ? `Duration: ${durationMins} min${remarks ? ' · ' + remarks : ''}` : (remarks || null)]
     );
 
     // Notify host
     const notifEvent = log_type === 'entry' ? 'pass_entry' : 'pass_exit';
+    const notifMsg = log_type === 'entry'
+      ? `${pass.visitor_name} entered via ${gate_name} on pass ${pass.pass_number}.`
+      : `${pass.visitor_name} exited via ${gate_name}. Duration: ${durationMins} min.`;
     await client.query(
       `INSERT INTO notifications (target_user_id, event, title, message, pass_id)
        VALUES ($1, $2::notif_event, $3, $4, $5)`,
@@ -368,20 +395,60 @@ exports.gateLog = async (req, res, next) => {
         pass.host_user_id,
         notifEvent,
         `Visitor ${log_type === 'entry' ? 'entered' : 'exited'} — ${pass.visitor_name}`,
-        `${log_type === 'entry' ? 'Entry' : 'Exit'} recorded at ${gate_name} for pass ${pass.pass_number}.`,
+        notifMsg,
         id,
       ]
     );
 
     await client.query('COMMIT');
 
-    return created(res, rows[0], `${log_type === 'entry' ? 'Entry' : 'Exit'} logged successfully`);
+    const msg = log_type === 'entry'
+      ? 'Entry logged successfully'
+      : `Exit logged — ${durationMins} min inside`;
+    return created(res, { ...rows[0], duration_mins: durationMins }, msg);
   } catch (err) {
     await client.query('ROLLBACK');
     next(err);
   } finally {
     client.release();
   }
+};
+
+/**
+ * GET /api/passes/currently-inside
+ */
+exports.getCurrentlyInside = async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT * FROM v_currently_inside ORDER BY entry_time DESC`
+    );
+    return success(res, rows);
+  } catch (err) { next(err); }
+};
+
+/**
+ * GET /api/passes/gate-eligible
+ * Returns approved passes available for gate-in (not currently inside, not expired)
+ */
+exports.getGateEligible = async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT p.id, p.pass_number, p.visitor_name, p.visitor_phone, p.visitor_company,
+              p.host_name, p.department_name, p.purpose, p.valid_from, p.valid_until,
+              p.companion_count, p.preferred_gate,
+              p.qr_url AS qr_text,
+              (SELECT COUNT(*) FROM gate_logs gl WHERE gl.pass_id = p.id AND gl.log_type = 'entry') AS entry_count
+       FROM passes p
+       WHERE p.status = 'approved'
+         AND p.valid_until >= NOW()
+         AND NOT EXISTS (
+           SELECT 1 FROM v_currently_inside ci WHERE ci.pass_id = p.id
+         )
+       ORDER BY p.valid_from ASC
+       LIMIT 100`
+    );
+    return success(res, rows);
+  } catch (err) { next(err); }
 };
 
 /**

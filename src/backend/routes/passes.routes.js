@@ -14,6 +14,8 @@ router.use(authenticate);
 router.get('/',                 ctrl.list);
 router.get('/visitor-lookup',   ctrl.visitorLookup);
 router.get('/reports',          authorize('admin'), ctrl.getReport);
+router.get('/currently-inside', authorize('admin','gate','approver'), ctrl.getCurrentlyInside);
+router.get('/gate-eligible',    authorize('admin','gate'), ctrl.getGateEligible);
 router.get('/:id',              ctrl.get);
 
 router.post('/',

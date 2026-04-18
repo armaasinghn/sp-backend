@@ -127,6 +127,8 @@ exports.create = async (req, res, next) => {
       host_user_id, photo_url,
       companions = [], companion_count,
       preferred_gate = null,
+      rc_verified = false, rc_owner_name = null, rc_make_model = null,
+      rc_insurance_upto = null, rc_insurance_valid = null, rc_blacklisted = false,
     } = req.body;
 
     // Validate Govt. ID format if provided
@@ -173,8 +175,10 @@ exports.create = async (req, res, next) => {
          department_id, department_name, photo_url,
          requested_by_id, self_registered,
          companions, companion_count,
-         preferred_gate
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+         preferred_gate,
+         rc_verified, rc_owner_name, rc_make_model,
+         rc_insurance_upto, rc_insurance_valid, rc_blacklisted
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
        RETURNING *`,
       [
         passNumber, visitor_name, visitor_phone, visitor_email || null,
@@ -190,6 +194,10 @@ exports.create = async (req, res, next) => {
         JSON.stringify(companions || []),
         Array.isArray(companions) ? companions.length : (companion_count || 0),
         preferred_gate || null,
+        rc_verified || false,
+        rc_owner_name || null, rc_make_model || null,
+        rc_insurance_upto || null, rc_insurance_valid ?? null,
+        rc_blacklisted || false,
       ]
     );
     const pass = rows[0];

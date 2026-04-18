@@ -10,6 +10,7 @@ router.use('/visitors',      require('./visitors.routes'));
 router.use('/users',         require('./users.routes'));
 router.use('/notifications', require('./notifications.routes'));
 router.use('/gates',         require('./gates.routes'));
+router.use('/verify',        require('./verify.routes'));
 
 // Health check
 router.get('/health', (req, res) => res.json({

@@ -480,6 +480,13 @@ function mapPass(p) {
     companions:Array.isArray(p.companions)?p.companions:(p.companions?JSON.parse(p.companions):[]),
     companion_count:p.companion_count||0,
     preferred_gate:p.preferred_gate||'',
+    rc_verified:p.rc_verified||false,
+    rc_owner_name:p.rc_owner_name||'',
+    rc_make_model:p.rc_make_model||'',
+    rc_insurance_upto:p.rc_insurance_upto||'',
+    rc_insurance_valid:p.rc_insurance_valid??null,
+    rc_blacklisted:p.rc_blacklisted||false,
+    vtype:p.vehicle_type||p.vtype||'',
   };
 }
 
@@ -1665,7 +1672,7 @@ async function passesPage(){
         <tbody>
           ${list.map((p,i)=>`<tr class="row-link" onclick="goDetail('${p.id}')">
             <td><span class="code" style="font-size:12px;white-space:nowrap">${p.num}</span></td>
-            <td><div style="display:flex;align-items:center;gap:9px">${av(p.vname,28,avColors[i%avColors.length])}<span style="font-weight:600;color:var(--navy)">${p.vname}</span>${p.companion_count>0?'<span style="background:var(--acc);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:600;margin-left:4px">+'+p.companion_count+'</span>':''}</div></td>
+            <td><div style="display:flex;align-items:center;gap:9px">${av(p.vname,28,avColors[i%avColors.length])}<span style="font-weight:600;color:var(--navy)">${p.vname}</span>${p.companion_count>0?'<span style="background:var(--acc);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:600;margin-left:4px">+'+p.companion_count+'</span>':''}${p.rc_blacklisted?'<span style="background:#fef2f2;color:#dc2626;border-radius:6px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:4px">BLACKLISTED</span>':''}</div></td>
             <td style="color:var(--slate);white-space:nowrap">${p.vphone||'—'}</td>
             <td style="font-weight:500">${p.host||'—'}</td>
             <td style="color:var(--muted)">${p.dept||'—'}</td>
@@ -1858,7 +1865,19 @@ function _renderPassDetail(p){
       +row('Phone',    p.vphone)
       +row('Email',    p.vemail||p.email||'')
       +row('Address',  p.vaddr||p.address||'')
-      +row('Vehicle',  p.vehicle||p.vehicle_number||'')
+      +(p.vehicle||p.vehicle_number
+        ? '<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border)">'
+            +'<span style="width:120px;font-size:12.5px;color:var(--muted);flex-shrink:0">Vehicle</span>'
+            +'<span style="display:flex;align-items:center;gap:8px">'
+              +'<span style="font-weight:600;color:var(--navy);font-family:monospace;letter-spacing:.03em">'+(p.vehicle||p.vehicle_number||'')+'</span>'
+              +(p.rc_blacklisted
+                ? '<span style="background:#fef2f2;color:#dc2626;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700">BLACKLISTED</span>'
+                : (p.rc_verified
+                    ? '<span style="background:#f0fdf4;color:#16a34a;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:600">✓ RC Verified</span>'
+                    : ''))
+            +'</span>'
+          +'</div>'
+        : '')
       +row('Govt. ID', (p.nat||p.national_id_type||'')+(p.natid||p.national_id?' · '+(p.natid||p.national_id):''))
       +(p.companion_count>0 && p.companions && p.companions.length
         ? '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">'
@@ -1907,6 +1926,29 @@ function _renderPassDetail(p){
       +row('Valid Until',fdts(p.until||p.valid_until||''))
       +row('Notes',      p.notes||'')
     +'</div>'
+
+    // RC Verification card
+    +(p.rc_verified && p.vehicle
+      ? '<div class="card" style="padding:20px;border-left:3px solid '+(p.rc_blacklisted?'#ef4444':'#10b981')+'">'
+          +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'
+            +'<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em">Vehicle Verification</div>'
+            +'<span style="background:'+(p.rc_blacklisted?'#fef2f2':'#f0fdf4')+';color:'+(p.rc_blacklisted?'#dc2626':'#16a34a')+';border-radius:20px;padding:3px 12px;font-size:11.5px;font-weight:700">'
+              +(p.rc_blacklisted?'⚠ BLACKLISTED':'✓ VERIFIED')
+            +'</span>'
+          +'</div>'
+          +(p.rc_make_model?row('Make / Model', p.rc_make_model):'')
+          +(p.rc_owner_name?row('RC Owner', p.rc_owner_name):'')
+          +(p.rc_insurance_upto
+            ? '<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border)">'
+                +'<span style="width:120px;font-size:12.5px;color:var(--muted);flex-shrink:0">Insurance Until</span>'
+                +'<span style="font-weight:600;color:'+(p.rc_insurance_valid===false?'#dc2626':'var(--navy)')+'">'
+                  +(p.rc_insurance_upto ? new Date(p.rc_insurance_upto).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—')
+                  +(p.rc_insurance_valid===false?' <span style="font-size:11px;color:#dc2626">(EXPIRED)</span>':'')
+                +'</span>'
+              +'</div>'
+            : '')
+        +'</div>'
+      : '')
 
     // Meeting Officer card
     +'<div class="card" style="padding:20px">'
@@ -2128,10 +2170,32 @@ async function requestPage(){
 
         // Row 5: Vehicle Number + Vehicle Type
         '<div class="form-row">'+
-          '<div class="fg"><label class="fl">Vehicle Number</label><input id="vvn" placeholder="MH 01 AB 1234"/></div>'+
+          '<div class="fg">'+
+            '<label class="fl">Vehicle Number</label>'+
+            '<div style="display:flex;gap:8px;align-items:stretch">'+
+              '<input id="vvn" placeholder="e.g. DL3CAM0001" oninput="this.value=this.value.toUpperCase().replace(/[\\s]/g,\'\');rcVerifiedData=null;var c=document.getElementById(\'rc-details-card\');if(c)c.style.display=\'none\';var s=document.getElementById(\'veh-status\');if(s)s.style.display=\'none\';" maxlength="13" style="flex:1;text-transform:uppercase;font-family:monospace;letter-spacing:.04em"/>'+
+              '<button type="button" id="veh-verify-btn" onclick="verifyVehicle()" style="background:var(--acc);color:#fff;border:none;border-radius:8px;padding:0 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;display:flex;align-items:center;gap:6px">'+
+                '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'+
+                'Verify'+
+              '</button>'+
+            '</div>'+
+            '<div id="veh-status" style="display:none;margin-top:6px"></div>'+
+          '</div>'+
           '<div class="fg"><label class="fl">Vehicle Type</label>'+
             '<select id="vvt"><option value="none">None</option><option>Car</option><option>Motorcycle</option><option>Truck</option><option>Van</option><option>Bicycle</option></select>'+
           '</div>'+
+        '</div>'+
+        // RC details card — hidden until verified
+        '<div id="rc-details-card" style="display:none;margin-bottom:16px;border:1.5px solid var(--border);border-radius:12px;overflow:hidden">'+
+          '<div id="rc-card-header" style="padding:12px 16px;display:flex;align-items:center;justify-content:space-between">'+
+            '<div style="display:flex;align-items:center;gap:8px">'+
+              '<span id="rc-verified-icon" style="font-size:15px"></span>'+
+              '<span id="rc-card-title" style="font-size:13.5px;font-weight:600"></span>'+
+            '</div>'+
+            '<button type="button" onclick="clearVehicleVerification()" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1;padding:0 4px">&times;</button>'+
+          '</div>'+
+          '<div id="rc-data-grid" style="padding:14px 16px;display:grid;grid-template-columns:repeat(3,1fr);gap:10px 20px;background:#fff"></div>'+
+          '<div id="rc-warnings" style="display:none;padding:10px 16px;background:#fef3c7;border-top:1px solid #fde68a"></div>'+
         '</div>'+
 
         // Row 6: Address (full width)
@@ -2638,6 +2702,150 @@ async function refreshInsidePanel(){
   } catch(e){ toast('Failed to refresh','err'); }
 }
 
+/* ── RC VEHICLE VERIFICATION ────────────────────────── */
+var rcVerifiedData = null; // set on successful verify, cleared on input change
+
+async function verifyVehicle(){
+  var input  = document.getElementById('vvn');
+  var btn    = document.getElementById('veh-verify-btn');
+  var rcNum  = (input ? input.value : '').toUpperCase().replace(/[\s\-]/g,'');
+
+  if(!rcNum){ _showVehStatus('error','Please enter a vehicle number first'); return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Verifying...';
+
+  document.getElementById('veh-status').style.display = 'none';
+  document.getElementById('rc-details-card').style.display = 'none';
+  rcVerifiedData = null;
+
+  try {
+    var result = await apiFetch('POST','/verify/rc',{vehicle_number: rcNum});
+    if(result.status !== 'success'){
+      _showVehStatus('error', result.message || 'Vehicle not found');
+      return;
+    }
+    var d = result.data;
+    rcVerifiedData = d;
+    _autoFillVehicleType(d.body_type, d.vehicle_category);
+    _renderRCCard(d, result.blacklisted, result.warning);
+    _showVehStatus('success','✓ Verified — '+[d.maker,d.model].filter(Boolean).join(' '));
+  } catch(err){
+    var msg = err.message||'Verification failed';
+    if(msg.indexOf('422')!==-1) msg='Vehicle not found in RTO records';
+    _showVehStatus('error', msg);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Verify';
+  }
+}
+
+function _showVehStatus(type, msg){
+  var el = document.getElementById('veh-status');
+  if(!el) return;
+  var styles = {
+    success: 'background:#f0fdf4;color:#166534;border:1px solid #bbf7d0',
+    error:   'background:#fef2f2;color:#7f1d1d;border:1px solid #fecaca',
+    warn:    'background:#fffbeb;color:#92400e;border:1px solid #fde68a',
+  };
+  el.style.cssText = 'display:block;font-size:12px;padding:7px 12px;border-radius:7px;margin-top:6px;' + (styles[type]||styles.error);
+  el.textContent = msg;
+}
+
+function _autoFillVehicleType(bodyType, categoryDesc){
+  var sel = document.getElementById('vvt');
+  if(!sel) return;
+  var bt = (bodyType||'').toUpperCase();
+  var cd = (categoryDesc||'').toUpperCase();
+  if(bt.indexOf('2 WHEEL')!==-1||cd.indexOf('CYCLE')!==-1||cd.indexOf('SCOOTER')!==-1||bt.indexOf('MOTOR CYCLE')!==-1) sel.value='Motorcycle';
+  else if(bt.indexOf('SALOON')!==-1||bt.indexOf('HATCHBACK')!==-1||bt.indexOf('SEDAN')!==-1||bt.indexOf('SUV')!==-1||cd.indexOf('MOTOR CAR')!==-1) sel.value='Car';
+  else if(bt.indexOf('VAN')!==-1||bt.indexOf('MPV')!==-1) sel.value='Van';
+  else if(bt.indexOf('TRUCK')!==-1||bt.indexOf('LORRY')!==-1||cd.indexOf('GOODS')!==-1) sel.value='Truck';
+  else if(bt.indexOf('BUS')!==-1) sel.value='Bus';
+}
+
+function clearVehicleVerification(){
+  rcVerifiedData = null;
+  var c=document.getElementById('rc-details-card'); if(c) c.style.display='none';
+  var s=document.getElementById('veh-status');      if(s) s.style.display='none';
+  var i=document.getElementById('vvn');             if(i) i.value='';
+  var v=document.getElementById('vvt');             if(v) v.value='none';
+}
+
+function _fmtRCDate(dateStr){
+  if(!dateStr||dateStr==='1800-01-01') return '';
+  try{ return new Date(dateStr).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); }
+  catch(e){ return dateStr; }
+}
+
+function _renderRCCard(d, blacklisted, warningMsg){
+  var card   = document.getElementById('rc-details-card');
+  var header = document.getElementById('rc-card-header');
+  var title  = document.getElementById('rc-card-title');
+  var icon   = document.getElementById('rc-verified-icon');
+  var grid   = document.getElementById('rc-data-grid');
+  var warns  = document.getElementById('rc-warnings');
+  if(!card) return;
+
+  if(blacklisted){
+    header.style.background    = '#fef2f2';
+    header.style.borderBottom  = '1px solid #fecaca';
+    icon.textContent  = '⚠';
+    title.textContent = 'Vehicle BLACKLISTED — verify before entry';
+    title.style.color = '#ef4444';
+  } else {
+    header.style.background    = '#f0fdf4';
+    header.style.borderBottom  = '1px solid #bbf7d0';
+    icon.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>';
+    title.textContent = [d.maker, d.model].filter(Boolean).join(' ') + (d.rc_number ? ' · '+d.rc_number : '');
+    title.style.color = '#166534';
+  }
+
+  var fields = [
+    {label:'Owner Name',      val:d.owner_name},
+    {label:'Make & Model',    val:[d.maker,d.model].filter(Boolean).join(' ')},
+    {label:'Vehicle Type',    val:d.vehicle_category||d.body_type},
+    {label:'Fuel Type',       val:d.fuel_type},
+    {label:'Color',           val:d.color},
+    {label:'Chassis No.',     val:d.chassis_number},
+    {label:'Engine No.',      val:d.engine_number},
+    {label:'Reg. Date',       val:_fmtRCDate(d.registration_date)},
+    {label:'Manufactured',    val:d.manufactured},
+    {label:'Fitness Upto',    val:_fmtRCDate(d.fitness_upto),    alert:d.fitness_valid===false},
+    {label:'Insurance Upto',  val:_fmtRCDate(d.insurance_upto),  alert:d.insurance_valid===false},
+    {label:'Insurer',         val:d.insurance_company},
+    {label:'PUCC Upto',       val:_fmtRCDate(d.pucc_upto),       alert:d.pucc_valid===false},
+    {label:'Emission Norms',  val:d.emission_norms},
+    {label:'Financer',        val:d.financer},
+    {label:'Seat Capacity',   val:d.seat_capacity ? String(d.seat_capacity) : ''},
+  ].filter(function(f){ return f.val && f.val.trim(); });
+
+  grid.innerHTML = fields.map(function(f){
+    return '<div style="padding:8px 0;border-bottom:1px solid #f1f5f9">'+
+      '<div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:2px">'+f.label+'</div>'+
+      '<div style="font-size:13px;font-weight:500;color:'+(f.alert?'#dc2626':'#0f172a')+'">'+(f.alert?'⚠ ':'')+f.val+(f.alert?'<span style="font-size:10px;color:#dc2626;margin-left:4px">(EXPIRED)</span>':'')+'</div>'+
+      '</div>';
+  }).join('');
+
+  var warningsList = [];
+  if(blacklisted)             warningsList.push('🚫 Vehicle has a blacklist entry');
+  if(d.insurance_valid===false) warningsList.push('⚠ Insurance has expired ('+_fmtRCDate(d.insurance_upto)+')');
+  if(d.fitness_valid===false)   warningsList.push('⚠ Fitness certificate has expired ('+_fmtRCDate(d.fitness_upto)+')');
+  if(d.pucc_valid===false)      warningsList.push('⚠ PUCC / Pollution certificate has expired');
+  if(warningMsg)                warningsList.push('⚠ '+warningMsg);
+
+  if(warningsList.length){
+    warns.style.display = 'block';
+    warns.innerHTML = warningsList.map(function(w){
+      return '<div style="font-size:12.5px;color:#92400e;font-weight:500;padding:2px 0">'+w+'</div>';
+    }).join('');
+  } else {
+    warns.style.display = 'none';
+  }
+
+  card.style.display = 'block';
+}
+
 /* ── GOVT ID VALIDATION ─────────────────────────────── */
 var GOVT_ID_RULES = {
   'Aadhaar': {
@@ -2865,6 +3073,12 @@ async function submitPass(){
       govt_id_number:(function(){ var t=($('vit')||{}).value; var v=($('vi')||{}).value||''; var r=GOVT_ID_RULES[t]; return r?r.sanitize(v):(v||undefined); })()||undefined,
       vehicle_number:($('vvn')||{}).value||undefined,
       vehicle_type:($('vvt')||{}).value||undefined,
+      rc_verified:rcVerifiedData ? true : false,
+      rc_owner_name:rcVerifiedData ? rcVerifiedData.owner_name||'' : undefined,
+      rc_make_model:rcVerifiedData ? ([rcVerifiedData.maker,rcVerifiedData.model].filter(Boolean).join(' '))||'' : undefined,
+      rc_insurance_upto:rcVerifiedData ? rcVerifiedData.insurance_upto||undefined : undefined,
+      rc_insurance_valid:rcVerifiedData ? rcVerifiedData.insurance_valid : undefined,
+      rc_blacklisted:rcVerifiedData ? !!(rcVerifiedData.blacklist_status) : false,
       purpose:purp.toLowerCase(),
       description:($('pdet')||{}).value||undefined,
       notes:($('pnotes')||{}).value||undefined,
@@ -2881,7 +3095,7 @@ async function submitPass(){
     passes.unshift(newp);
     var cMsg = validCompanions.length ? ' (+'+validCompanions.length+' companion'+(validCompanions.length>1?'s':'')+')' : '';
     toast('Pass '+newp.num+' submitted successfully'+cMsg);
-    selectedHost=null; capturedPhoto=''; resetCompanions();
+    selectedHost=null; capturedPhoto=''; resetCompanions(); rcVerifiedData=null;
     goDetail(newp.id);
   } catch(e){
     // Surface field-level errors from backend if available
@@ -3224,13 +3438,29 @@ async function downloadGatePass(passId){
   if(p.vco) detailRow('Company', p.vco);
   if(p.vaddr) detailRow('Address', p.vaddr);
   if(p.nat) detailRow('Govt. ID', p.nat + (p.natid ? ': ' + p.natid : ''));
-  if(p.vehicle) detailRow('Vehicle', p.vehicle);
+  if(p.vehicle) detailRow('Vehicle', p.vehicle + (p.rc_verified ? ' (RC Verified)' : ''));
   if(p.companion_count > 0) detailRow('Additional Visitors', '+' + p.companion_count + ' person(s) accompanying');
 
   y += 2;
   doc.setDrawColor(226, 232, 240);
   doc.line(mg, y, W - mg, y);
   y += 8;
+
+  // ── VEHICLE VERIFICATION (if RC verified) ────────────
+  if(p.rc_verified && p.rc_make_model) {
+    sectionHead(p.rc_blacklisted ? 'VEHICLE — ⚠ BLACKLISTED' : 'VEHICLE — RC VERIFIED');
+    detailRow('Make / Model', p.rc_make_model);
+    if(p.rc_owner_name) detailRow('RC Owner', p.rc_owner_name);
+    if(p.rc_insurance_upto) {
+      var insLabel = p.rc_insurance_valid === false ? 'Insurance (EXPIRED)' : 'Insurance Until';
+      var insVal   = new Date(p.rc_insurance_upto).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+      detailRow(insLabel, insVal);
+    }
+    y += 2;
+    doc.setDrawColor(226, 232, 240);
+    doc.line(mg, y, W - mg, y);
+    y += 8;
+  }
 
   // ── VISIT DETAILS ────────────────────────────────────
   sectionHead('VISIT DETAILS');

@@ -221,6 +221,7 @@ tr.row-link:hover td{background:#f0f9ff}
   .s-logo-name{ font-size:14px!important; }
   [style*="grid-template-columns:repeat(4,1fr)"]{ grid-template-columns:1fr 1fr!important; }
   [style*="grid-template-columns:1fr 1fr 260px"]{ grid-template-columns:1fr 1fr!important; }
+  .pass-detail-grid{ grid-template-columns:1fr 1fr!important; }
   [style*="grid-template-columns:1fr 1fr 1fr"]{ grid-template-columns:1fr 1fr!important; }
   [style*="grid-template-columns:1fr 280px"]{ grid-template-columns:1fr!important; }
   [style*="grid-template-columns:1fr 320px"]{ grid-template-columns:1fr!important; }
@@ -288,6 +289,7 @@ tr.row-link:hover td{background:#f0f9ff}
   [style*="grid-template-columns:1fr 260px"]{ grid-template-columns:1fr!important; }
   [style*="grid-template-columns:1fr 1fr 260px"]{ grid-template-columns:1fr!important; }
   [style*="grid-template-columns:1fr 1fr 1fr"]{ grid-template-columns:1fr!important; }
+  .pass-detail-grid{ grid-template-columns:1fr!important; }
   [style*="grid-template-columns:repeat(3,1fr)"]{ grid-template-columns:1fr!important; }
 
   /* Stats: 2 cols on mobile */
@@ -522,7 +524,7 @@ let selectedHost = null;
 
 let page = 'login', role = 'admin', user = {name:'',role:''};
 let detailId = null, fstatus = 'all', prevPage = 'dashboard';
-let reportData = [], reportSummary = {};
+let reportData = [], reportSummary = {}, reportGenerated = false;
 let gates = [];
 
 /* ─── UTILS ─────────────────────────────────── */
@@ -663,7 +665,7 @@ let selR='admin';
 const defPage={admin:'dashboard',approver:'dashboard',gate:'gate-in',visitor:'request'};
 
 const navConf={
-  admin:    ['dashboard','passes','reports','request','visitors','notifications','admin','profile'],
+  admin:    ['dashboard','passes','reports','request','gate-in','gate-out','visitors','notifications','admin','profile'],
   approver: ['dashboard','passes','request','notifications','profile'],
   gate:     ['gate-in','gate-out','passes','visitors','notifications','profile'],
   visitor:  ['request','my-passes','notifications','profile'],
@@ -819,18 +821,10 @@ function buildLogin(){
 
   // Demo test account dropdown
   var testAccounts = [
-    {label:'Admin',           sublabel:'admin@securitypass.local',              email:'admin@securitypass.local',       pass:'password'},
-    {label:'Anjali Das',      sublabel:'anjali@company.com — Admin',        email:'anjali@company.com',         pass:'password'},
-    {label:'Priya Sharma',    sublabel:'priya@company.com — Approver',      email:'priya@company.com',          pass:'priya@123'},
-    {label:'Rohan Mehta',     sublabel:'rohan@company.com — Approver',      email:'rohan@company.com',          pass:'pass@123'},
-    {label:'Kavita Rao',      sublabel:'kavita@company.com — Approver',     email:'kavita@company.com',         pass:'pass@123'},
-    {label:'Dev Anand',       sublabel:'dev@company.com — Approver',        email:'dev@company.com',            pass:'pass@123'},
-    {label:'Suresh Pillai',   sublabel:'suresh@company.com — Approver',     email:'suresh@company.com',         pass:'pass@123'},
-    {label:'Meena Krishnan',  sublabel:'meena@company.com — Approver',      email:'meena@company.com',          pass:'pass@123'},
-    {label:'Arjun Nambiar',   sublabel:'arjun@company.com — Approver',      email:'arjun@company.com',          pass:'pass@123'},
-    {label:'Ravi Kumar',      sublabel:'ravi@company.com — Gate User',      email:'ravi@company.com',           pass:'pass@123'},
-    {label:'Sunita George',   sublabel:'sunita.g@company.com — Gate User',  email:'sunita.g@company.com',       pass:'pass@123'},
-    {label:'Visitor Demo',    sublabel:'visitor@securitypass.local — Visitor',  email:'visitor@securitypass.local',     pass:'password'},
+    {label:'Admin User — Admin',      email:'admin@securitypass.local',  pass:'password'},
+    {label:'Priya Sharma — Approver', email:'priya@company.com',         pass:'priya@123'},
+    {label:'Ravi Kumar — Gate User',  email:'ravi@company.com',          pass:'pass@123'},
+    {label:'Visitor Demo — Visitor',  email:'visitor@securitypass.local',pass:'password'},
   ];
 
   var demoWrap = document.createElement('div');
@@ -860,7 +854,7 @@ function buildLogin(){
   var optHtml = '<option value="" style="color:#94a3b8">-- Select test account --</option>';
   testAccounts.forEach(function(acc, i){
     optHtml += '<option value="' + i + '" style="color:#1e293b;background:#fff">'
-             + acc.label + '  |  ' + acc.sublabel
+             + acc.label
              + '</option>';
   });
   sel.innerHTML = optHtml;
@@ -1227,6 +1221,9 @@ var rptFrom='', rptUntil='', rptStatus='', rptDept='';
 
 function reportsPage(){
   if(role !== 'admin'){ go('dashboard'); return; }
+  // Always start fresh — no stale dates or data
+  rptFrom=''; rptUntil='';
+  reportData=[]; reportSummary={}; reportGenerated=false;
   var m=$('main-area'); if(!m)return;
   m.innerHTML=`<div class="page-header fade">
     <div>
@@ -1234,11 +1231,11 @@ function reportsPage(){
       <p class="page-sub">Detailed pass activity reports with date-range filtering</p>
     </div>
     <div style="display:flex;gap:8px">
-      <button class="btn bo" onclick="downloadReportExcel()">
+      <button id="rpt-dl-excel" class="btn bo" onclick="downloadReportExcel()" disabled style="opacity:.45;cursor:not-allowed">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Excel
       </button>
-      <button class="btn bo" onclick="downloadReportPDF()">
+      <button id="rpt-dl-pdf" class="btn bo" onclick="downloadReportPDF()" disabled style="opacity:.45;cursor:not-allowed">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         PDF
       </button>
@@ -1251,11 +1248,11 @@ function reportsPage(){
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
         <div style="flex:1;min-width:140px">
           <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:5px">From Date</label>
-          <input type="date" id="rpt-from" value="${rptFrom}" onchange="rptFrom=this.value"/>
+          <input type="date" id="rpt-from" value="${rptFrom}" onchange="rptFrom=this.value;this.style.borderColor='';reportGenerated=false;_rptDlState()"/>
         </div>
         <div style="flex:1;min-width:140px">
           <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:5px">Until Date</label>
-          <input type="date" id="rpt-until" value="${rptUntil}" onchange="rptUntil=this.value"/>
+          <input type="date" id="rpt-until" value="${rptUntil}" onchange="rptUntil=this.value;this.style.borderColor='';reportGenerated=false;_rptDlState()"/>
         </div>
         <div style="flex:1;min-width:130px">
           <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:5px">Status</label>
@@ -1271,7 +1268,7 @@ function reportsPage(){
           <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:5px">Department</label>
           <input type="text" id="rpt-dept" placeholder="Filter by department…" value="${rptDept}" oninput="rptDept=this.value" onkeydown="if(event.key==='Enter')generateReport()"/>
         </div>
-        <button class="btn bp" onclick="generateReport()" style="flex-shrink:0">
+        <button id="rpt-generate-btn" class="btn bp" onclick="generateReport()" style="flex-shrink:0;transition:transform .15s,box-shadow .15s">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           Generate
         </button>
@@ -1287,12 +1284,17 @@ function reportsPage(){
     </div>
 
     <!-- Summary + Table filled by generateReport() -->
-    <div id="rpt-summary"></div>
-    <div id="rpt-table"></div>
+    <div id="rpt-summary" style="display:none"></div>
+    <div id="rpt-table">
+      <div style="text-align:center;padding:60px 24px;color:var(--muted)">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="display:block;margin:0 auto 14px;opacity:.25"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        <div style="font-size:15px;font-weight:600;color:var(--navy);margin-bottom:6px">No report generated yet</div>
+        <div style="font-size:13px">Select a date range and click <strong>Generate</strong> to load data</div>
+      </div>
+    </div>
   </div>`;
 
-  // Auto-generate on first load if we already have data
-  if(reportData.length) renderReportSummary();
+  setTimeout(_rptDlState, 0); // apply correct button state after DOM renders
 }
 
 function setRptRange(label){
@@ -1316,21 +1318,42 @@ function setRptRange(label){
     rptFrom=''; rptUntil='';
     var fi=document.getElementById('rpt-from'), ui=document.getElementById('rpt-until');
     if(fi)fi.value=''; if(ui)ui.value='';
-    generateReport(); return;
+    reportGenerated=false; _rptDlState(); return;
   }
   rptFrom  = from.toISOString().slice(0,10);
   rptUntil = until.toISOString().slice(0,10);
   var fi=document.getElementById('rpt-from'), ui=document.getElementById('rpt-until');
   if(fi)fi.value=rptFrom; if(ui)ui.value=rptUntil;
-  generateReport();
+  reportGenerated=false; _rptDlState();
 }
 
 async function generateReport(){
   var st = document.getElementById('rpt-summary');
   var tb = document.getElementById('rpt-table');
   if(!st || !tb) return;
-  st.innerHTML='<div style="padding:24px;text-align:center;color:var(--muted)">Loading report…</div>';
-  tb.innerHTML='';
+
+  // Validate dates
+  var fromVal  = document.getElementById('rpt-from')?.value  || '';
+  var untilVal = document.getElementById('rpt-until')?.value || '';
+  if(!fromVal){
+    toast('Please select a From Date','warn');
+    var fi=document.getElementById('rpt-from'); if(fi) fi.style.borderColor='#ef4444';
+    return;
+  }
+  if(!untilVal){
+    toast('Please select an Until Date','warn');
+    var ui=document.getElementById('rpt-until'); if(ui) ui.style.borderColor='#ef4444';
+    return;
+  }
+  if(fromVal > untilVal){
+    toast('From date must be before Until date','warn');
+    var fi2=document.getElementById('rpt-from'); if(fi2) fi2.style.borderColor='#ef4444';
+    return;
+  }
+
+  st.style.display='none';
+  st.innerHTML='';
+  tb.innerHTML='<div style="padding:24px;text-align:center;color:var(--muted)">Loading report…</div>';
   try {
     var qs = [];
     if(rptFrom)   qs.push('from='+encodeURIComponent(rptFrom));
@@ -1338,10 +1361,14 @@ async function generateReport(){
     if(rptStatus) qs.push('status='+encodeURIComponent(rptStatus));
     if(rptDept)   qs.push('dept='+encodeURIComponent(rptDept));
     var res = await apiFetch('GET','/passes/reports'+(qs.length?'?'+qs.join('&'):''));
-    reportData    = res.data    || [];
-    reportSummary = res.summary || {};
+    reportData      = res.data    || [];
+    reportSummary   = res.summary || {};
+    reportGenerated = true;
+    _rptDlState();
     renderReportSummary();
   } catch(e){
+    reportGenerated = false;
+    _rptDlState();
     st.innerHTML='<div style="padding:24px;text-align:center;color:var(--red)">'+(e.message||'Failed to load report')+'</div>';
   }
 }
@@ -1350,6 +1377,7 @@ function renderReportSummary(){
   var st = document.getElementById('rpt-summary');
   var tb = document.getElementById('rpt-table');
   if(!st || !tb) return;
+  st.style.display='';
   var s = reportSummary;
 
   var statItems = [
@@ -1407,9 +1435,49 @@ function fmtRpt(v){
   return new Date(v).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
 }
 
+function _rptDlState(){
+  var on = reportGenerated && reportData.length > 0;
+  ['rpt-dl-excel','rpt-dl-pdf'].forEach(function(id){
+    var b = document.getElementById(id);
+    if(!b) return;
+    b.disabled           = !on;
+    b.style.opacity      = on ? '1' : '0.45';
+    b.style.cursor       = on ? '' : 'not-allowed';
+  });
+}
+
+function _rptValidate(){
+  var from  = (document.getElementById('rpt-from')||{}).value||'';
+  var until = (document.getElementById('rpt-until')||{}).value||'';
+  var fi    = document.getElementById('rpt-from');
+  var ui    = document.getElementById('rpt-until');
+  if(!from || !until){
+    toast('Please select From and Until dates before downloading','warn');
+    if(fi && !from)  fi.style.borderColor='#ef4444';
+    if(ui && !until) ui.style.borderColor='#ef4444';
+    return false;
+  }
+  if(from > until){
+    toast('From date must be before Until date','warn');
+    if(fi) fi.style.borderColor='#ef4444';
+    return false;
+  }
+  if(!reportGenerated || !reportData.length){
+    toast('Please click Generate first to load the report data','warn');
+    var gb = document.getElementById('rpt-generate-btn');
+    if(gb){
+      gb.style.transform='scale(1.05)';
+      gb.style.boxShadow='0 0 0 4px rgba(8,145,178,0.3)';
+      setTimeout(function(){ gb.style.transform=''; gb.style.boxShadow=''; },600);
+    }
+    return false;
+  }
+  return true;
+}
+
 function downloadReportExcel(){
+  if(!_rptValidate()) return;
   if(typeof XLSX === 'undefined'){ toast('Excel library not loaded yet — try again','warn'); return; }
-  if(!reportData.length){ toast('Generate a report first','warn'); return; }
   var rows = reportData.map(function(r){
     return {
       'Pass #':           r.pass_number,
@@ -1422,19 +1490,13 @@ function downloadReportExcel(){
       'Entry Gate':       r.preferred_gate||'',
       'Status':           r.status,
       'Valid From':       fmtRpt(r.valid_from),
-      'Valid Until':      fmtRpt(r.valid_until),
+      'Valid Till':       fmtRpt(r.valid_until),
       'Approved By':      r.approved_by_name||'',
       'Approved At':      fmtRpt(r.approved_at),
-      'Entry Count':      parseInt(r.entry_count||0),
-      'Exit Count':       parseInt(r.exit_count||0),
-      'First Entry':      fmtRpt(r.first_entry),
-      'Last Exit':        fmtRpt(r.last_exit),
-      'Duration (min)':   r.duration_minutes!=null?Math.round(r.duration_minutes):'',
-      'Companions':       parseInt(r.companion_count||0),
     };
   });
   var ws = XLSX.utils.json_to_sheet(rows);
-  ws['!cols'] = [{wch:24},{wch:22},{wch:15},{wch:20},{wch:20},{wch:18},{wch:13},{wch:11},{wch:22},{wch:22},{wch:20},{wch:22},{wch:12},{wch:11},{wch:22},{wch:22},{wch:14},{wch:11}];
+  ws['!cols'] = [{wch:24},{wch:22},{wch:15},{wch:20},{wch:22},{wch:18},{wch:13},{wch:16},{wch:12},{wch:22},{wch:22},{wch:22},{wch:22}];
   var wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Report');
   var label = rptFrom&&rptUntil ? rptFrom+'_to_'+rptUntil : 'All';
@@ -1443,11 +1505,12 @@ function downloadReportExcel(){
 }
 
 function downloadReportPDF(){
+  if(!_rptValidate()) return;
   if(!window.jspdf || !window.jspdf.jsPDF){ toast('PDF library not loaded yet — try again','warn'); return; }
-  if(!reportData.length){ toast('Generate a report first','warn'); return; }
   var doc = new window.jspdf.jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
-  var dateStr = new Date().toLocaleDateString('en-IN');
-  var rangeStr = (rptFrom || '—')+' to '+(rptUntil || '—');
+  function fmtPDFDate(val){ if(!val) return '—'; try{ return new Date(val).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); }catch(e){ return String(val); } }
+  var dateStr  = fmtPDFDate(new Date());
+  var rangeStr = (rptFrom ? fmtPDFDate(rptFrom+'T00:00:00') : '—')+' to '+(rptUntil ? fmtPDFDate(rptUntil+'T00:00:00') : '—');
 
   doc.setFontSize(16);
   doc.setTextColor(8,145,178);
@@ -1472,32 +1535,34 @@ function downloadReportPDF(){
       r.preferred_gate||'—',
       fmtRpt(r.valid_from), fmtRpt(r.valid_until),
       (r.status||'').toUpperCase(),
-      r.entry_count||0,
-      r.duration_minutes!=null?Math.round(r.duration_minutes)+'m':'—',
     ];
   });
 
   doc.autoTable({
     startY: 40,
-    head:[['Pass #','Visitor','Contact','Mting Officer','Department','Purpose','Gate','Valid From','Valid Until','Status','Entries','Duration']],
+    head:[['Pass #','Visitor','Contact','Mting Officer','Department','Purpose','Gate','Valid From','Valid Till','Status']],
     body: rows,
     styles:{fontSize:7,cellPadding:2.2,overflow:'linebreak'},
     headStyles:{fillColor:[8,145,178],textColor:255,fontStyle:'bold',fontSize:7},
     alternateRowStyles:{fillColor:[240,249,255]},
     columnStyles:{
-      0:{cellWidth:26},1:{cellWidth:24},2:{cellWidth:20},3:{cellWidth:24},4:{cellWidth:18},
-      5:{cellWidth:16},6:{cellWidth:18},7:{cellWidth:28},8:{cellWidth:28},9:{cellWidth:14},10:{cellWidth:10},11:{cellWidth:12}
+      0:{cellWidth:28},1:{cellWidth:26},2:{cellWidth:22},3:{cellWidth:26},4:{cellWidth:20},
+      5:{cellWidth:18},6:{cellWidth:20},7:{cellWidth:30},8:{cellWidth:30},9:{cellWidth:16}
     },
     didDrawCell:function(d){
-      if(d.column.index===9 && d.cell.section==='body'){
-        var status=(d.cell.raw||'').toLowerCase();
-        var colors={approved:[16,185,129],pending:[245,158,11],rejected:[239,68,68],expired:[100,116,139]};
-        if(colors[status]){
-          doc.setTextColor.apply(doc,colors[status]);
-          doc.setFontSize(6.5);
-          doc.text(d.cell.raw,d.cell.x+d.cell.width/2,d.cell.y+d.cell.height/2,{align:'center',baseline:'middle'});
-        }
-      }
+      if(d.section!=='body' || d.column.index!==9) return;
+      var status=(d.cell.raw||'').toString().toLowerCase().trim();
+      if(!status) return;
+      var textColors={approved:[22,163,74],pending:[180,120,0],rejected:[185,28,28],expired:[71,85,105]};
+      var bgColors  ={approved:[240,253,244],pending:[255,251,235],rejected:[254,242,242],expired:[248,250,252]};
+      var tc=textColors[status]||[71,85,105];
+      var bg=bgColors[status]  ||[248,250,252];
+      doc.setFillColor(bg[0],bg[1],bg[2]);
+      doc.rect(d.cell.x+1,d.cell.y+1,d.cell.width-2,d.cell.height-2,'F');
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(6.5);
+      doc.setTextColor(tc[0],tc[1],tc[2]);
+      doc.text(status.toUpperCase(),d.cell.x+d.cell.width/2,d.cell.y+d.cell.height/2,{align:'center',baseline:'middle'});
     }
   });
 
@@ -1543,7 +1608,7 @@ function exportPassesExcel(){
       'Purpose':         p.purpose,
       'Entry Gate':      p.preferred_gate||'',
       'Valid From':      fmtExport(p.from),
-      'Valid Until':     fmtExport(p.until),
+      'Valid Till':      fmtExport(p.until),
       'Status':          p.status,
       'Approved By':     p.approved_by||'',
       'Approved At':     fmtExport(p.approved_at),
@@ -1565,7 +1630,7 @@ function exportPassesPDF(){
   if(!data.length){ toast('No passes to export','warn'); return; }
   var doc = new window.jspdf.jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
   var label = getExportLabel();
-  var date  = new Date().toLocaleDateString('en-IN');
+  var date  = new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
 
   doc.setFontSize(16);
   doc.setTextColor(8,145,178);
@@ -1587,7 +1652,7 @@ function exportPassesPDF(){
 
   doc.autoTable({
     startY: 33,
-    head:[['Pass #','Visitor','Contact','Meeting Officer','Dept','Purpose','Valid From','Valid Until','Status']],
+    head:[['Pass #','Visitor','Contact','Meeting Officer','Dept','Purpose','Valid From','Valid Till','Status']],
     body: rows,
     styles:{fontSize:8,cellPadding:3,overflow:'linebreak'},
     headStyles:{fillColor:[8,145,178],textColor:255,fontStyle:'bold',fontSize:8},
@@ -1598,15 +1663,19 @@ function exportPassesPDF(){
       6:{cellWidth:34}, 7:{cellWidth:34}, 8:{cellWidth:18}
     },
     didDrawCell:function(d){
-      if(d.column.index===8 && d.cell.section==='body'){
-        var status=(d.cell.raw||'').toLowerCase();
-        var colors={approved:[16,185,129],pending:[245,158,11],rejected:[239,68,68],expired:[100,116,139]};
-        if(colors[status]){
-          doc.setTextColor.apply(doc,colors[status]);
-          doc.setFontSize(7.5);
-          doc.text(d.cell.raw,d.cell.x+d.cell.width/2,d.cell.y+d.cell.height/2,{align:'center',baseline:'middle'});
-        }
-      }
+      if(d.section!=='body' || d.column.index!==8) return;
+      var status=(d.cell.raw||'').toString().toLowerCase().trim();
+      if(!status) return;
+      var textColors={approved:[22,163,74],pending:[180,120,0],rejected:[185,28,28],expired:[71,85,105]};
+      var bgColors  ={approved:[240,253,244],pending:[255,251,235],rejected:[254,242,242],expired:[248,250,252]};
+      var tc=textColors[status]||[71,85,105];
+      var bg=bgColors[status]  ||[248,250,252];
+      doc.setFillColor(bg[0],bg[1],bg[2]);
+      doc.rect(d.cell.x+1,d.cell.y+1,d.cell.width-2,d.cell.height-2,'F');
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(tc[0],tc[1],tc[2]);
+      doc.text(status.toUpperCase(),d.cell.x+d.cell.width/2,d.cell.y+d.cell.height/2,{align:'center',baseline:'middle'});
     }
   });
 
@@ -1847,7 +1916,7 @@ function _renderPassDetail(p){
 
   // 3-col grid
   +'<div class="page-content fade">'
-  +'<div style="display:grid;grid-template-columns:1fr 1fr 260px;gap:16px;align-items:start">'
+  +'<div class="pass-detail-grid" style="display:grid;grid-template-columns:280px 1fr 260px;gap:16px;align-items:start">'
 
   // ── COL 1: Visitor + Log ─────────────────────────────────────────────────
   +'<div style="display:flex;flex-direction:column;gap:14px">'
@@ -1901,9 +1970,26 @@ function _renderPassDetail(p){
     // Gate log
     + logHtml
 
+    // Meeting Officer card
+    +'<div class="card" style="padding:20px">'
+      +'<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:14px">Meeting Officer</div>'
+      +'<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">'
+        +'<div style="width:44px;height:44px;border-radius:50%;background:'+moColor+';display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#fff;flex-shrink:0">'+moIni+'</div>'
+        +'<div>'
+          +'<div style="font-weight:700;font-size:14px">'+(p.approver||p.host||'—')+'</div>'
+          +'<div style="font-size:12px;color:var(--muted)">'+(p.dept||p.host_department||'')+'</div>'
+          +(p.approver_email?'<div style="font-size:12px;color:var(--acc)">'+p.approver_email+'</div>':'')
+        +'</div>'
+      +'</div>'
+      +'<div style="padding:10px 12px;border-radius:8px;background:'+(p.status==='approved'?'var(--gl)':p.status==='rejected'?'var(--dl)':'var(--wl)')+';font-size:12.5px;font-weight:500;color:'+(p.status==='approved'?'#065f46':p.status==='rejected'?'#991b1b':'#92400e')+';display:flex;align-items:center;gap:8px">'
+        +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">'+(p.status==='approved'?'<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>':p.status==='rejected'?'<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>':'<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>')+'</svg>'
+        +(p.status==='approved'?'Approved this pass'+(p.approved_by?' by '+p.approved_by:''):p.status==='rejected'?'Rejected — '+(p.rejectReason||''):p.status==='pending'?'Notification sent — awaiting approval':'')
+      +'</div>'
+    +'</div>'
+
   +'</div>'
 
-  // ── COL 2: Visit details + Meeting Officer + Timeline ────────────────────
+  // ── COL 2: Visit details + RC Verification + Timeline ─────────────────────
   +'<div style="display:flex;flex-direction:column;gap:14px">'
 
     // Visit details card
@@ -1950,23 +2036,6 @@ function _renderPassDetail(p){
         +'</div>'
       : '')
 
-    // Meeting Officer card
-    +'<div class="card" style="padding:20px">'
-      +'<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:14px">Meeting Officer</div>'
-      +'<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">'
-        +'<div style="width:44px;height:44px;border-radius:50%;background:'+moColor+';display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#fff;flex-shrink:0">'+moIni+'</div>'
-        +'<div>'
-          +'<div style="font-weight:700;font-size:14px">'+( p.approver||p.host||'—')+'</div>'
-          +'<div style="font-size:12px;color:var(--muted)">'+(p.dept||p.host_department||'')+'</div>'
-          +(p.approver_email?'<div style="font-size:12px;color:var(--acc)">'+p.approver_email+'</div>':'')
-        +'</div>'
-      +'</div>'
-      +'<div style="padding:10px 12px;border-radius:8px;background:'+(p.status==='approved'?'var(--gl)':p.status==='rejected'?'var(--dl)':'var(--wl)')+';font-size:12.5px;font-weight:500;color:'+(p.status==='approved'?'#065f46':p.status==='rejected'?'#991b1b':'#92400e')+';display:flex;align-items:center;gap:8px">'
-        +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">'+(p.status==='approved'?'<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>':p.status==='rejected'?'<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>':'<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>')+'</svg>'
-        +(p.status==='approved'?'Approved this pass'+(p.approved_by?' by '+p.approved_by:''):p.status==='rejected'?'Rejected — '+(p.rejectReason||''):p.status==='pending'?'Notification sent — awaiting approval':'')
-      +'</div>'
-    +'</div>'
-
     // Timeline card
     +'<div class="card" style="padding:20px">'
       +'<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:14px">Timeline</div>'
@@ -1990,9 +2059,9 @@ function _renderPassDetail(p){
       +(p.status==='approved' && p.qr
         ? '<div id="qr-container-'+p.id+'" style="display:inline-block;padding:10px;border:1px solid var(--border);border-radius:10px;background:#fff;margin:0 auto"></div>'
           +'<div style="font-size:11.5px;color:var(--muted);margin-top:10px;font-family:monospace">'+p.num+'</div>'
-          +'<div style="font-size:11.5px;color:var(--muted);margin-top:4px">Scan at gate for entry &amp; exit</div>'+'<div style="margin-top:10px;padding:8px 10px;background:var(--surf);border:1px solid var(--border);border-radius:8px;font-size:11px;color:var(--muted);word-break:break-all;font-family:monospace;line-height:1.5">'+(p.qr_text||'')+'</div>'
+          +'<div style="font-size:11.5px;color:var(--muted);margin-top:4px">Scan at gate for entry &amp; exit</div>'
           +'<div style="display:flex;gap:8px;margin-top:14px">'
-            +'<button class="btn bo" style="flex:1;justify-content:center;font-size:12px" onclick="printSecurityPass(passes.find(function(x){return x.id===detailId}))">'
+            +'<button class="btn bo" style="flex:1;justify-content:center;font-size:12px" onclick="printGatePassPDF(detailId)">'
               +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>'
               +' Print'
             +'</button>'
@@ -2142,20 +2211,20 @@ async function requestPage(){
 
         // Row 2: Email + Company
         '<div class="form-row">'+
-          '<div class="fg"><label class="fl">Email</label><input id="ve" type="email" placeholder="visitor@example.com"/></div>'+
-          '<div class="fg"><label class="fl">Company / Organisation</label><input id="vc" placeholder="Company name"/></div>'+
+          '<div class="fg"><label class="fl">Email *</label><input id="ve" type="email" placeholder="visitor@example.com"/></div>'+
+          '<div class="fg"><label class="fl">Company / Organisation *</label><input id="vc" placeholder="Company name"/></div>'+
         '</div>'+
 
         // Row 4: ID Type + ID Number
         '<div class="form-row">'+
-          '<div class="fg"><label class="fl">Govt. ID Type</label>'+
+          '<div class="fg"><label class="fl">Govt. ID Type *</label>'+
             '<select id="vit" onchange="onVitChange(this.value)">'+
               '<option value="">— Select ID type —</option>'+
               '<option>Aadhaar</option><option>PAN</option><option>Passport</option><option>Driving Licence</option><option>Voter ID</option>'+
             '</select>'+
           '</div>'+
           '<div class="fg">'+
-            '<label class="fl">Govt. ID Number</label>'+
+            '<label class="fl">Govt. ID Number *</label>'+
             '<input id="vi" placeholder="Select ID type first" maxlength="16"/>'+
             '<div style="display:flex;justify-content:space-between;margin-top:4px;min-height:16px">'+
               '<div id="vi-err" style="font-size:11.5px;display:none;font-weight:500"></div>'+
@@ -2171,7 +2240,7 @@ async function requestPage(){
         // Row 5: Vehicle Number + Vehicle Type
         '<div class="form-row">'+
           '<div class="fg">'+
-            '<label class="fl">Vehicle Number</label>'+
+            '<label class="fl">Vehicle Number *</label>'+
             '<div style="display:flex;gap:8px;align-items:stretch">'+
               '<input id="vvn" placeholder="e.g. DL3CAM0001" oninput="this.value=this.value.toUpperCase().replace(/[\\s]/g,\'\');rcVerifiedData=null;var c=document.getElementById(\'rc-details-card\');if(c)c.style.display=\'none\';var s=document.getElementById(\'veh-status\');if(s)s.style.display=\'none\';" maxlength="13" style="flex:1;text-transform:uppercase;font-family:monospace;letter-spacing:.04em"/>'+
               '<button type="button" id="veh-verify-btn" onclick="verifyVehicle()" style="background:var(--acc);color:#fff;border:none;border-radius:8px;padding:0 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;display:flex;align-items:center;gap:6px">'+
@@ -2181,7 +2250,7 @@ async function requestPage(){
             '</div>'+
             '<div id="veh-status" style="display:none;margin-top:6px"></div>'+
           '</div>'+
-          '<div class="fg"><label class="fl">Vehicle Type</label>'+
+          '<div class="fg"><label class="fl">Vehicle Type *</label>'+
             '<select id="vvt"><option value="none">None</option><option>Car</option><option>Motorcycle</option><option>Truck</option><option>Van</option><option>Bicycle</option></select>'+
           '</div>'+
         '</div>'+
@@ -2199,7 +2268,7 @@ async function requestPage(){
         '</div>'+
 
         // Row 6: Address (full width)
-        '<div class="fg"><label class="fl">Address</label>'+
+        '<div class="fg"><label class="fl">Address *</label>'+
           '<textarea id="vaddr" rows="2" placeholder="Street, City, State, PIN code" style="font-family:inherit;font-size:13.5px;resize:vertical"></textarea>'+
         '</div>'+
 
@@ -2255,7 +2324,7 @@ async function requestPage(){
         '</div>'+
 
         // Row 9: Description — full width, stretched
-        '<div class="fg"><label class="fl">Description / Agenda</label>'+
+        '<div class="fg"><label class="fl">Description / Agenda *</label>'+
           '<textarea id="pdet" rows="3" placeholder="Describe the purpose, agenda, items to be delivered, etc." style="font-family:inherit;font-size:13.5px;resize:vertical"></textarea>'+
         '</div>'+
 
@@ -2439,10 +2508,13 @@ function passFieldErr(id, msg){
 }
 function passClearErrs(){
   document.querySelectorAll('.field-err-msg').forEach(function(e){ e.remove(); });
-  ['vn','vp','ve','pp','mo-select','entry-gate','pvf','pvu','vi'].forEach(function(id){
+  ['vn','vp','ve','vc','vit','vi','vvn','vvt','vaddr','mo-select','pp','entry-gate','pvf','pvu','pdet'].forEach(function(id){
     var el = document.getElementById(id);
     if(el){ el.style.borderColor = ''; el.style.boxShadow = ''; }
   });
+  // Clear photo border
+  var ph = document.getElementById('photo-placeholder');
+  if(ph) ph.style.borderColor = '';
 }
 function passFieldClear(id){
   var el = document.getElementById(id);
@@ -2855,7 +2927,7 @@ var GOVT_ID_RULES = {
     example:   '234567890123',
     sanitize:  function(v){ return v.replace(/[\s\-]/g,''); },
     errorMsg:  'Aadhaar must be exactly 12 digits',
-    checksum:  true,
+    checksum:  false,
   },
   'PAN': {
     pattern:   /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/,
@@ -2914,8 +2986,6 @@ function validateGovtId(idType, rawValue){
     return {valid:false, error:idType+' must be '+rule.minLength+' characters (you entered '+s.length+')'};
   if(!rule.pattern.test(s))
     return {valid:false, error:rule.errorMsg+' · Example: '+rule.example};
-  if(rule.checksum && !verhoeffCheck(s))
-    return {valid:true, warning:'This Aadhaar number appears invalid — please double-check'};
   return {valid:true, warning:null};
 }
 
@@ -3027,17 +3097,19 @@ async function submitPass(){
   var validFrom  = ($('pvf')||{}).value||'';
   var validUntil = ($('pvu')||{}).value||'';
   var hasErr = false;
+  // ── Personal info
   if(!name.trim()){ passFieldErr('vn','Full name is required'); hasErr=true; }
   if(!phone.trim()){ passFieldErr('vp','Contact number is required'); hasErr=true; }
-  var gateVal = ($('entry-gate')||{}).value||'';
-  if(!moSel){ passFieldErr('mo-select','Please select a Meeting Officer'); hasErr=true; }
-  if(!purp){ passFieldErr('pp','Please select the purpose of visit'); hasErr=true; }
-  if(!gateVal){ passFieldErr('entry-gate','Please select an entry gate'); hasErr=true; }
-  if(!validFrom){ passFieldErr('pvf','Valid From date is required'); hasErr=true; }
-  if(!validUntil){ passFieldErr('pvu','Valid Until date is required'); hasErr=true; }
+  var emailVal = (($('ve')||{}).value||'').trim();
+  if(!emailVal){ passFieldErr('ve','Email address is required'); hasErr=true; }
+  var coVal = (($('vc')||{}).value||'').trim();
+  if(!coVal){ passFieldErr('vc','Company / Organisation is required'); hasErr=true; }
+  // ── Govt ID
   var idType = ($('vit')||{}).value||'';
   var idNum  = (($('vi')||{}).value||'').trim();
-  if(idNum){
+  if(!idType){ passFieldErr('vit','Please select a Govt. ID type'); hasErr=true; }
+  if(!idNum){ passFieldErr('vi','Govt. ID number is required'); hasErr=true; }
+  if(idType && idNum){
     var idRes = validateGovtId(idType, idNum);
     if(!idRes.valid){
       passFieldErr('vi', idRes.error);
@@ -3048,6 +3120,33 @@ async function submitPass(){
     } else if(idRes.warning){
       toast(idRes.warning, 'warn');
     }
+  }
+  // ── Vehicle
+  var vvnVal = (($('vvn')||{}).value||'').trim();
+  var vvtVal = ($('vvt')||{}).value||'';
+  if(!vvnVal){ passFieldErr('vvn','Vehicle number is required'); hasErr=true; }
+  if(!vvtVal || vvtVal === 'none'){ passFieldErr('vvt','Please select a vehicle type'); hasErr=true; }
+  // ── Address
+  var vaddrVal = (($('vaddr')||{}).value||'').trim();
+  if(!vaddrVal){ passFieldErr('vaddr','Address is required'); hasErr=true; }
+  // ── Visit info
+  var gateVal = ($('entry-gate')||{}).value||'';
+  if(!moSel){ passFieldErr('mo-select','Please select a Meeting Officer'); hasErr=true; }
+  if(!purp){ passFieldErr('pp','Please select the purpose of visit'); hasErr=true; }
+  if(!gateVal){ passFieldErr('entry-gate','Please select an entry gate'); hasErr=true; }
+  // ── Description
+  var pdetVal = (($('pdet')||{}).value||'').trim();
+  if(!pdetVal){ passFieldErr('pdet','Description / Agenda is required'); hasErr=true; }
+  // ── Dates
+  if(!validFrom){ passFieldErr('pvf','Valid From date is required'); hasErr=true; }
+  if(!validUntil){ passFieldErr('pvu','Valid Until date is required'); hasErr=true; }
+  if(validFrom && validUntil && validFrom >= validUntil){ passFieldErr('pvu','Valid Until must be after Valid From'); hasErr=true; }
+  // ── Photo
+  if(!capturedPhoto){
+    var ph = document.getElementById('photo-placeholder');
+    if(ph){ ph.style.borderColor='var(--red)'; ph.style.boxShadow='0 0 0 3px rgba(239,68,68,.15)'; }
+    toast('Visitor photo is required','warn');
+    hasErr=true;
   }
   // Validate companions
   for(var ci=0;ci<companions.length;ci++){
@@ -3327,30 +3426,23 @@ async function readAndGo(id, passId){
 }
 
 /* ─── GATE PASS PDF DOWNLOAD ─────────────────────────── */
-async function downloadGatePass(passId){
-  if(!window.jspdf || !window.jspdf.jsPDF){ toast('PDF library not loaded — try again','warn'); return; }
-
-  // Find pass in local array, or fetch from API
-  var p = passes.find(function(x){ return x.id === passId; });
+async function _getPassForGP(passId){
+  var p = (passes||[]).find(function(x){ return x.id === passId; });
   if(!p){
-    try {
-      var r = await apiFetch('GET', '/passes/'+passId);
-      p = mapPass(r.data);
-    } catch(e){ toast('Pass not found','err'); return; }
+    try { var r = await apiFetch('GET','/passes/'+passId); p = mapPass(r.data); }
+    catch(e){ return null; }
   }
-  if(p.status !== 'approved'){ toast('Pass must be approved to download','warn'); return; }
-  if(!p.qr_text){ toast('QR not available for this pass','warn'); return; }
+  return p;
+}
 
-  toast('Generating gate pass PDF…');
-
-  // Render QR to base64 PNG
+async function _buildGatePassDoc(p){
   var qrDataUrl;
   try { qrDataUrl = await _qrToDataURL(p.qr_text); }
-  catch(e){ toast('QR render failed — try again','err'); return; }
+  catch(e){ toast('QR render failed — try again','err'); return null; }
 
   var doc = new window.jspdf.jsPDF({orientation:'portrait', unit:'mm', format:'a4'});
-  var W = doc.internal.pageSize.width;   // 210mm
-  var H = doc.internal.pageSize.height;  // 297mm
+  var W = doc.internal.pageSize.width;
+  var H = doc.internal.pageSize.height;
   var mg = 18;
   var y = 0;
 
@@ -3540,8 +3632,34 @@ async function downloadGatePass(passId){
     W/2, footerY + 9, {align:'center'}
   );
 
+  return doc;
+}
+
+async function downloadGatePass(passId){
+  if(!window.jspdf || !window.jspdf.jsPDF){ toast('PDF library not loaded — try again','warn'); return; }
+  var p = await _getPassForGP(passId);
+  if(!p){ toast('Pass not found','err'); return; }
+  if(p.status !== 'approved'){ toast('Pass must be approved to download','warn'); return; }
+  if(!p.qr_text){ toast('QR not available for this pass','warn'); return; }
+  toast('Generating gate pass PDF…');
+  var doc = await _buildGatePassDoc(p);
+  if(!doc) return;
   doc.save('GatePass_' + (p.num || passId) + '.pdf');
   toast('Gate pass PDF downloaded');
+}
+
+async function printGatePassPDF(passId){
+  if(!window.jspdf || !window.jspdf.jsPDF){ toast('PDF library not loaded — try again','warn'); return; }
+  var p = await _getPassForGP(passId);
+  if(!p){ toast('Pass not found','err'); return; }
+  if(p.status !== 'approved'){ toast('Pass must be approved to print','warn'); return; }
+  if(!p.qr_text){ toast('QR not available for this pass','warn'); return; }
+  toast('Preparing print…');
+  var doc = await _buildGatePassDoc(p);
+  if(!doc) return;
+  var url = URL.createObjectURL(doc.output('blob'));
+  var win = window.open(url, '_blank');
+  if(win) win.onload = function(){ win.focus(); win.print(); };
 }
 
 function _qrToDataURL(qrText){

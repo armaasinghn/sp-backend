@@ -417,11 +417,20 @@ tr.row-link:hover td{background:#f0f9ff}
 .pending-row:hover{background:var(--surf)}
 .pending-urgency{width:3px;border-radius:2px;align-self:stretch;flex-shrink:0}
 
+/* ── Gate module ── */
+.gate-page-wrap{max-width:700px;margin:0 auto}
+.gate-section-label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px}
+.gate-select-wrap{position:relative;margin-bottom:24px}
+.gate-select-wrap select{width:100%;padding:13px 16px;font-size:14px;font-weight:500;color:var(--navy);background:var(--white);border:1.5px solid var(--border);border-radius:var(--rlg);cursor:pointer;appearance:auto;font-family:var(--font-body)}
+.gate-select-wrap select:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(8,145,178,.15)}
+.gate-empty-state{text-align:center;padding:64px 24px;color:var(--muted)}
+
 </style>
 <script src="/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 <body>
 <div id="toast"></div>
@@ -662,12 +671,12 @@ const roleConf={
 };
 let selR='admin';
 
-const defPage={admin:'dashboard',approver:'dashboard',gate:'gate-in',visitor:'request'};
+const defPage={admin:'dashboard',approver:'dashboard',gate:'passes',visitor:'request'};
 
 const navConf={
   admin:    ['dashboard','passes','reports','request','gate-in','gate-out','visitors','notifications','admin','profile'],
   approver: ['dashboard','passes','request','notifications','profile'],
-  gate:     ['gate-in','gate-out','passes','visitors','notifications','profile'],
+  gate:     ['passes','gate-in','gate-out','visitors','notifications','profile'],
   visitor:  ['request','my-passes','notifications','profile'],
 };
 
@@ -959,12 +968,16 @@ async function doLogin(){
             color:u.color||'#0891b2', initial:u.initial||u.name.charAt(0).toUpperCase(),
             department:u.department||''};
     page = defPage[role] || 'dashboard';
-    // Load staff users for approver dropdowns
+    // Load staff users for all non-visitor roles
     if(role !== 'visitor'){
       apiFetch('GET','/users').then(function(su){ staffUsers = (su.data||[]).map(mapUser); }).catch(function(){});
     }
     // Load gates
     apiFetch('GET','/gates').then(function(gr){ gates = gr.data||[]; }).catch(function(){});
+    // Pre-fetch passes for gate role so All Passes page is instant and gate-in dropdown is ready
+    if(role === 'gate'){
+      apiFetch('GET','/passes').then(function(pr){ passes = (pr.data||[]).map(mapPass); }).catch(function(){});
+    }
     render();
     toast('Welcome back, '+u.name+'!');
   } catch(e) {
@@ -2212,7 +2225,7 @@ async function requestPage(){
         // Row 2: Email + Company
         '<div class="form-row">'+
           '<div class="fg"><label class="fl">Email *</label><input id="ve" type="email" placeholder="visitor@example.com"/></div>'+
-          '<div class="fg"><label class="fl">Company / Organisation *</label><input id="vc" placeholder="Company name"/></div>'+
+          '<div class="fg"><label class="fl">Company / Organisation</label><input id="vc" placeholder="Company name (optional)"/></div>'+
         '</div>'+
 
         // Row 4: ID Type + ID Number
@@ -2240,7 +2253,7 @@ async function requestPage(){
         // Row 5: Vehicle Number + Vehicle Type
         '<div class="form-row">'+
           '<div class="fg">'+
-            '<label class="fl">Vehicle Number *</label>'+
+            '<label class="fl">Vehicle Number</label>'+
             '<div style="display:flex;gap:8px;align-items:stretch">'+
               '<input id="vvn" placeholder="e.g. DL3CAM0001" oninput="this.value=this.value.toUpperCase().replace(/[\\s]/g,\'\');rcVerifiedData=null;var c=document.getElementById(\'rc-details-card\');if(c)c.style.display=\'none\';var s=document.getElementById(\'veh-status\');if(s)s.style.display=\'none\';" maxlength="13" style="flex:1;text-transform:uppercase;font-family:monospace;letter-spacing:.04em"/>'+
               '<button type="button" id="veh-verify-btn" onclick="verifyVehicle()" style="background:var(--acc);color:#fff;border:none;border-radius:8px;padding:0 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;display:flex;align-items:center;gap:6px">'+
@@ -2250,7 +2263,7 @@ async function requestPage(){
             '</div>'+
             '<div id="veh-status" style="display:none;margin-top:6px"></div>'+
           '</div>'+
-          '<div class="fg"><label class="fl">Vehicle Type *</label>'+
+          '<div class="fg"><label class="fl">Vehicle Type</label>'+
             '<select id="vvt"><option value="none">None</option><option>Car</option><option>Motorcycle</option><option>Truck</option><option>Van</option><option>Bicycle</option></select>'+
           '</div>'+
         '</div>'+
@@ -2305,22 +2318,6 @@ async function requestPage(){
               '<option value="interview">Interview</option><option value="maintenance">Maintenance</option><option value="audit">Audit</option><option value="other">Other</option>'+
             '</select>'+
           '</div>'+
-        '</div>'+
-
-        // Row 8: Entry Gate
-        '<div class="form-row">'+
-          '<div class="fg">'+
-            '<label class="fl">Entry Gate *</label>'+
-            '<select id="entry-gate" onchange="passFieldClear(\'entry-gate\')" style="font-size:13.5px">'+
-              '<option value="">— Select Entry Gate —</option>'+
-              (gates.length
-                ? gates.map(function(g){ return '<option value="'+escHtml(g.name)+'">'+escHtml(g.name)+'</option>'; }).join('')
-                : '<option value="Main Gate">Main Gate</option><option value="Gate 2">Gate 2</option><option value="Gate 3">Gate 3</option><option value="Visitor Gate">Visitor Gate</option>'
-              )+
-            '</select>'+
-            '<div style="font-size:11.5px;color:var(--muted);margin-top:4px">Gate where the visitor will check in</div>'+
-          '</div>'+
-          '<div class="fg"></div>'+
         '</div>'+
 
         // Row 9: Description — full width, stretched
@@ -2508,7 +2505,7 @@ function passFieldErr(id, msg){
 }
 function passClearErrs(){
   document.querySelectorAll('.field-err-msg').forEach(function(e){ e.remove(); });
-  ['vn','vp','ve','vc','vit','vi','vvn','vvt','vaddr','mo-select','pp','entry-gate','pvf','pvu','pdet'].forEach(function(id){
+  ['vn','vp','ve','vc','vit','vi','vvn','vvt','vaddr','mo-select','pp','pvf','pvu','pdet'].forEach(function(id){
     var el = document.getElementById(id);
     if(el){ el.style.borderColor = ''; el.style.boxShadow = ''; }
   });
@@ -2524,206 +2521,366 @@ function passFieldClear(id){
   var msg = wrap && wrap.querySelector('.field-err-msg');
   if(msg) msg.remove();
 }
-/* ── GATE IN / GATE OUT ──────────────────────────────── */
-var _gSelId   = null;   // currently selected pass ID in gate flow
-var _gateEligible = []; // passes available for gate-in
-var _gateInside   = []; // passes currently inside (for gate-out)
+/* ═══════════════════════════════════════════════════════
+   GATE IN / GATE OUT MODULE
+   ═══════════════════════════════════════════════════════ */
+var GATE_NAMES    = [];
+var _gSelId       = null;
+var _gateEligible = [];
+var _gateInside   = [];
+var _GPC_CLR      = ['#0891b2','#10b981','#f59e0b','#3b82f6','#8b5cf6','#ef4444','#06b6d4','#ec4899'];
 
-/* Helper: build coloured avatar initials */
-function _gAv(name, size){
-  var c = avColors[Math.abs(name.split('').reduce(function(h,ch){ return h*31+ch.charCodeAt(0); },0)) % avColors.length];
-  return '<div style="width:'+size+'px;height:'+size+'px;border-radius:50%;background:'+c+';display:flex;align-items:center;justify-content:center;font-size:'+(size/2.5)+'px;font-weight:700;color:#fff;flex-shrink:0;font-family:var(--font-head)">'+escHtml((name||'?').charAt(0).toUpperCase())+'</div>';
+// ── Helpers ───────────────────────────────────────────────────
+function _allPersons(p){
+  var list = [{id:'holder', name:p.vname, phone:p.vphone||'', tag:'Pass Holder', isHolder:true}];
+  (p.companions||[]).forEach(function(c){
+    list.push({id:c.id, name:c.name, phone:c.phone||'', tag:c.relation||'Companion', isHolder:false});
+  });
+  return list;
+}
+function _fmtDt(d){
+  if(!d) return '—';
+  var dt = new Date(d);
+  return dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})
+    +' '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+}
+function _fmtDate(d){
+  if(!d) return '—';
+  return new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+}
+function _fmtTime(d){
+  if(!d) return '';
+  return new Date(d).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
 }
 
-/* Build a pass card row for the selection list */
-function _gPassRow(p, mode){
-  var sel = _gSelId === p.id;
-  var since = '';
-  if(mode === 'out' && p.entry_time){
-    var mins = Math.round((Date.now() - new Date(p.entry_time).getTime()) / 60000);
-    since = ' · <span style="color:var(--green);font-weight:600">'+mins+' min inside</span>';
-  }
-  return '<div id="grow-'+p.id+'" onclick="_gSelect(\''+p.id+'\',\''+mode+'\')" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:10px;cursor:pointer;transition:all .15s;border:2px solid '+(sel?'var(--acc)':'transparent')+';background:'+(sel?'var(--acc3)':'var(--white)')+';margin-bottom:4px">'
-    +_gAv(p.visitor_name||p.vname||'', 38)
-    +'<div style="flex:1;min-width:0">'
-      +'<div style="font-weight:600;font-size:14px;color:var(--navy)">'+escHtml(p.visitor_name||p.vname||'')+'</div>'
-      +'<div style="font-size:12px;color:var(--muted);margin-top:1px">'+escHtml(p.visitor_company||p.vco||'Individual')+' · '+escHtml(p.host_name||p.host||'')+since+'</div>'
+// ── Build inline gate pass card ───────────────────────────────
+function _gPassCard(p, mode){
+  var passNum  = p.num||'—';
+  var visName  = p.vname||'—';
+  var visCo    = p.vco||'Individual visitor';
+  var visPhone = p.vphone||'';
+  var visVeh   = p.vehicle||(p.vtype||'');
+  var mo       = p.host||'—';
+  var moDept   = p.dept||'';
+  var purpose  = p.purpose||'—';
+  var notes    = p.notes||'';
+  var fromDt   = p.from||'';
+  var untilDt  = p.until||'';
+  var appBy    = p.approved_by||mo;
+  var appAt    = p.approved_at ? _fmtDt(p.approved_at) : '';
+  var qrText   = p.qr_text||'';
+  var qrId     = 'g-qr-'+p.id;
+
+  var ini = visName.charAt(0).toUpperCase();
+  var photoHtml = p.photo_url
+    ? '<img src="'+p.photo_url+'" style="width:60px;height:60px;border-radius:50%;object-fit:cover;border:2px solid #e2e8f0;flex-shrink:0"/>'
+    : '<div style="width:60px;height:60px;border-radius:50%;background:#0891b2;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#fff;flex-shrink:0">'+ini+'</div>';
+
+  var lastEntry = p.logs&&p.logs.filter(function(l){return l.type==='entry';}).pop();
+  var entryBar  = mode==='out' && lastEntry
+    ? '<div style="margin-top:12px;padding:9px 14px;background:#dbeafe;border:1px solid #bfdbfe;border-radius:8px;font-size:12px;color:#1e3a8a;font-weight:500;display:flex;align-items:center;gap:8px">'
+        +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
+        +'Entered via <strong style="margin:0 3px">'+lastEntry.gate+'</strong> at '+lastEntry.time
+      +'</div>'
+    : '';
+
+  var govtId = p.nat ? p.nat+': '+(p.natid||'—') : '';
+
+  return '<div style="background:#fff;border:1.5px solid #e2e8f0;border-radius:14px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,.08);margin-bottom:20px">'
+    +'<div style="background:#0f172a;padding:16px 22px;display:flex;align-items:center;justify-content:space-between">'
+      +'<div style="display:flex;align-items:center;gap:12px">'
+        +'<div style="width:38px;height:38px;background:#0891b2;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0">'
+          +'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>'
+        +'</div>'
+        +'<div>'
+          +'<div style="font-weight:700;font-size:16px;color:#fff;letter-spacing:-.01em">SECURITY PASS</div>'
+          +'<div style="font-size:10px;color:rgba(255,255,255,.4);letter-spacing:.07em;text-transform:uppercase;margin-top:2px">'+(mode==='in'?'Gate Entry':'Gate Exit')+' Clearance</div>'
+        +'</div>'
+      +'</div>'
+      +'<div style="text-align:right">'
+        +'<div style="font-family:monospace;font-size:18px;font-weight:700;color:#06b6d4;letter-spacing:.06em">'+passNum+'</div>'
+        +(appAt?'<div style="font-size:11px;color:rgba(255,255,255,.35);margin-top:3px">Approved '+appAt+'</div>':'')
+      +'</div>'
     +'</div>'
-    +'<div style="text-align:right;flex-shrink:0">'
-      +'<div style="font-size:11.5px;font-family:monospace;color:var(--acc);font-weight:600">'+escHtml(p.pass_number||p.num||'')+'</div>'
-      +(p.preferred_gate||p.gate_name?'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+escHtml(p.preferred_gate||p.gate_name||'')+'</div>':'')
+    +'<div style="display:grid;grid-template-columns:1fr 170px">'
+      +'<div style="padding:18px 22px;border-right:1px solid #e2e8f0">'
+        +'<div style="display:flex;align-items:center;gap:14px;padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid #e2e8f0">'
+          +photoHtml
+          +'<div>'
+            +'<div style="font-size:18px;font-weight:700;color:#0f172a">'+visName+'</div>'
+            +'<div style="font-size:12.5px;color:#64748b;margin-top:2px">'+visCo+'</div>'
+            +(visPhone?'<div style="font-size:12px;color:#94a3b8;margin-top:2px">'+visPhone+'</div>':'')
+          +'</div>'
+        +'</div>'
+        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 20px">'
+          +'<div style="padding:7px 0;border-bottom:1px solid #f8fafc"><div style="font-size:9.5px;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:2px">Meeting Officer</div><div style="font-size:12.5px;color:#0f172a;font-weight:500">'+mo+(moDept?' · '+moDept:'')+'</div></div>'
+          +'<div style="padding:7px 0;border-bottom:1px solid #f8fafc"><div style="font-size:9.5px;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:2px">Purpose</div><div style="font-size:12.5px;color:#0f172a;font-weight:500;text-transform:capitalize">'+purpose+'</div></div>'
+          +(visVeh?'<div style="padding:7px 0;border-bottom:1px solid #f8fafc"><div style="font-size:9.5px;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:2px">Vehicle</div><div style="font-size:12.5px;color:#0f172a;font-weight:500">'+visVeh+'</div></div>':'')
+          +(govtId?'<div style="padding:7px 0;border-bottom:1px solid #f8fafc"><div style="font-size:9.5px;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:2px">Govt ID</div><div style="font-size:12.5px;color:#0f172a;font-weight:500">'+govtId+'</div></div>':'')
+          +(notes?'<div style="padding:7px 0;grid-column:1/-1;border-bottom:1px solid #f8fafc"><div style="font-size:9.5px;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:2px">Notes</div><div style="font-size:12.5px;color:#0f172a;font-weight:500">'+notes+'</div></div>':'')
+        +'</div>'
+        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">'
+          +'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:9px 13px">'
+            +'<div style="font-size:9.5px;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:3px">Valid From</div>'
+            +'<div style="font-size:13px;font-weight:600;color:#0f172a">'+_fmtDate(fromDt)+'</div>'
+            +'<div style="font-size:11.5px;color:#64748b;margin-top:1px">'+_fmtTime(fromDt)+'</div>'
+          +'</div>'
+          +'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:9px 13px">'
+            +'<div style="font-size:9.5px;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:3px">Valid Until</div>'
+            +'<div style="font-size:13px;font-weight:600;color:#0f172a">'+_fmtDate(untilDt)+'</div>'
+            +'<div style="font-size:11.5px;color:#64748b;margin-top:1px">'+_fmtTime(untilDt)+'</div>'
+          +'</div>'
+        +'</div>'
+        +'<div style="margin-top:12px;padding:9px 13px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;font-size:12px;color:#166534;font-weight:500;display:flex;align-items:center;gap:7px">'
+          +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>'
+          +'Approved by <strong style="margin:0 3px">'+appBy+'</strong>'+(appAt?' · '+appAt:'')
+        +'</div>'
+        +entryBar
+      +'</div>'
+      +'<div style="padding:18px 14px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#fafafa;border-left:1px solid #e2e8f0">'
+        +(p.qr && qrText
+          ? '<div id="'+qrId+'" style="padding:10px;border:1px solid #e2e8f0;border-radius:10px;background:#fff"></div>'
+            +'<div style="font-family:monospace;font-size:9px;color:#94a3b8;text-align:center;margin-top:7px;line-height:1.5">'+passNum+'</div>'
+            +'<div style="font-size:10.5px;color:#94a3b8;text-align:center;margin-top:5px;line-height:1.5">Scan at gate<br/>for entry / exit</div>'
+          : '<div style="width:110px;height:110px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;display:flex;align-items:center;justify-content:center">'
+              +'<div style="text-align:center;font-size:10.5px;color:#94a3b8;line-height:1.5">QR not<br/>available</div>'
+            +'</div>'
+        )
+      +'</div>'
+    +'</div>'
+    +'<div style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:10px 22px;display:flex;justify-content:space-between;align-items:center">'
+      +'<span style="font-size:11px;color:#94a3b8">This pass is non-transferable. Present at gate for scanning.</span>'
+      +'<span style="font-size:10px;color:#cbd5e1;letter-spacing:.04em">SecurityPass · Gate '+(mode==='in'?'Entry':'Exit')+' Clearance</span>'
     +'</div>'
   +'</div>';
 }
 
-/* Build the confirmation detail panel */
-function _gDetailPanel(p, mode){
-  var gateOpts = gates.length
-    ? gates.map(function(g){ return '<option value="'+escHtml(g.name)+'"'+(p.preferred_gate===g.name?' selected':'')+'>'+escHtml(g.name)+'</option>'; }).join('')
-    : '<option>Main Gate</option><option>Gate 2</option><option>Gate 3</option><option>Visitor Gate</option>';
-
-  var companions = '';
-  if((p.companion_count||0) > 0){
-    companions = '<div style="margin-top:10px;padding:10px 12px;background:var(--surf);border-radius:8px;border:1px solid var(--border)">'
-      +'<span style="font-size:12px;font-weight:600;color:var(--muted)">+'+p.companion_count+' additional visitor'+(p.companion_count>1?'s':'')+'</span>'
+// ── Persons list ──────────────────────────────────────────────
+function _gPersonsList(p, mode){
+  var persons = _allPersons(p);
+  if(persons.length === 0) return '';
+  var rows = persons.map(function(per){
+    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 18px;border-bottom:1px solid var(--border)">'
+      +'<span style="font-size:13.5px;font-weight:600;color:var(--navy)">'+per.name+'</span>'
+      +'<span style="font-size:13px;color:var(--muted);font-family:var(--font-mono)">'+(per.phone||'—')+'</span>'
     +'</div>';
-  }
-
-  var entryInfo = '';
-  if(mode === 'out' && p.entry_time){
-    var mins = Math.round((Date.now() - new Date(p.entry_time).getTime()) / 60000);
-    entryInfo = '<div style="margin-top:10px;padding:10px 12px;background:var(--gl);border-radius:8px;border:1px solid var(--green)">'
-      +'<div style="font-size:12px;font-weight:600;color:var(--gtx)">Entered via '+escHtml(p.gate_name||'Main Gate')+' at '+new Date(p.entry_time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})+'</div>'
-      +'<div style="font-size:11.5px;color:var(--gtx);margin-top:2px">Time inside: <strong>'+mins+' min</strong></div>'
-    +'</div>';
-  }
-
-  return '<div class="card" style="padding:20px">'
-    +'<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:14px">'+(mode==='in'?'Confirm Gate In':'Confirm Gate Out')+'</div>'
-
-    // Visitor header
-    +'<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)">'
-      +_gAv(p.visitor_name||p.vname||'', 44)
-      +'<div>'
-        +'<div style="font-size:16px;font-weight:700;color:var(--navy)">'+escHtml(p.visitor_name||p.vname||'')+'</div>'
-        +'<div style="font-size:12.5px;color:var(--muted)">'+escHtml(p.visitor_company||p.vco||'Individual visitor')+'</div>'
-      +'</div>'
+  }).join('');
+  return '<div style="border:1.5px solid var(--border);border-radius:var(--rlg);overflow:hidden;margin-bottom:20px;background:#fff">'
+    +'<div style="background:var(--navy);padding:10px 18px;display:flex;align-items:center;justify-content:space-between">'
+      +'<span style="font-size:11px;font-weight:700;color:rgba(255,255,255,.7);text-transform:uppercase;letter-spacing:.07em">Persons on this Pass</span>'
+      +'<span style="font-size:11px;color:rgba(255,255,255,.4)">'+persons.length+' person'+(persons.length>1?'s':'')+' · all will be '+(mode==='in'?'gated in':'gated out')+'</span>'
     +'</div>'
+    +rows
+  +'</div>';
+}
 
-    // Details grid
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;font-size:13px">'
-      +'<div><span style="color:var(--muted)">Pass #</span><br/><span style="font-weight:600;font-family:monospace;color:var(--acc)">'+escHtml(p.pass_number||p.num||'')+'</span></div>'
-      +'<div><span style="color:var(--muted)">Purpose</span><br/><span style="font-weight:500;text-transform:capitalize">'+escHtml(p.purpose||'')+'</span></div>'
-      +'<div><span style="color:var(--muted)">Meeting</span><br/><span style="font-weight:500">'+escHtml(p.host_name||p.host||'')+'</span></div>'
-      +'<div><span style="color:var(--muted)">Visitors</span><br/><span style="font-weight:500">'+(1+(p.companion_count||0))+' person'+(1+(p.companion_count||0)>1?'s':'')+'</span></div>'
-    +'</div>'
-
-    +companions
-    +entryInfo
-
-    // Gate selector
-    +'<div style="margin-top:14px">'
-      +'<label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:5px">Entry Gate</label>'
-      +'<select id="ggate-'+mode+'" style="width:100%;font-size:13.5px">'+gateOpts+'</select>'
-    +'</div>'
-
-    // Action buttons
-    +'<div style="display:flex;gap:8px;margin-top:16px">'
-      +(mode==='in'
-        ? '<button class="btn bp" style="flex:1;justify-content:center" onclick="_gConfirm(\'in\',\''+p.id+'\')">'
-            +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>'
-            +' Confirm Gate In'
-          +'</button>'
-        : '<button class="btn bd" style="flex:1;justify-content:center" onclick="_gConfirm(\'out\',\''+p.id+'\')">'
-            +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>'
-            +' Confirm Gate Out'
-          +'</button>'
-      )
-      +'<button class="btn bo" style="padding:9px 14px" onclick="_gSelId=null;'+(mode==='in'?'gateInPage':'gateOutPage')+'()">'
-        +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
+// ── Gate + confirm action bar ──────────────────────────────────
+function _gActionRow(p, mode){
+  var preferred = p.preferred_gate || (GATE_NAMES[0]||'Main Gate');
+  var gOpts = GATE_NAMES.length
+    ? GATE_NAMES.map(function(g){ return '<option value="'+g+'"'+(g===preferred?' selected':'')+'>'+g+'</option>'; }).join('')
+    : '<option value="Main Gate">Main Gate</option>';
+  var btnClr  = mode==='in' ? 'background:#059669' : 'background:#2563eb';
+  var btnIcon = mode==='in'
+    ? '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>'
+    : '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>';
+  var btnLbl  = mode==='in' ? 'Confirm Gate In' : 'Confirm Gate Out';
+  var onclk   = '_gConfirm(\''+mode+'\',\''+p.id+'\')';
+  return '<div style="background:#fff;border:1.5px solid var(--border);border-radius:var(--rlg);padding:18px 22px">'
+    +'<label class="fl" style="display:block;margin-bottom:7px">'+(mode==='in'?'Entry':'Exit')+' Gate</label>'
+    +'<div style="display:flex;align-items:stretch;gap:12px">'
+      +'<select id="ggate-'+mode+'" style="flex:0 0 210px;padding:11px 13px;font-size:13.5px;font-family:var(--font-body);border:1.5px solid var(--border);border-radius:var(--rlg)">'+gOpts+'</select>'
+      +'<button class="btn bp" style="flex:1;justify-content:center;padding:0 16px;'+btnClr+'" onclick="'+onclk+'">'
+        +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">'+btnIcon+'</svg>&nbsp;'+btnLbl
       +'</button>'
     +'</div>'
   +'</div>';
 }
 
-function _gSelect(passId, mode){
-  _gSelId = passId;
-  mode === 'in' ? gateInPage() : gateOutPage();
+// ── Render detail area ────────────────────────────────────────
+function _gRenderDetail(mode){
+  var el = document.getElementById('g-detail-'+mode);
+  if(!el) return;
+  if(!_gSelId){ el.innerHTML=''; return; }
+  var arr = mode==='in' ? _gateEligible : _gateInside;
+  var p = arr.find(function(x){ return x.id===_gSelId; });
+  if(!p){ el.innerHTML=''; return; }
+  el.innerHTML = _gPassCard(p, mode) + _gPersonsList(p, mode) + _gActionRow(p, mode);
+  if(p.qr && p.qr_text){
+    setTimeout(function(){
+      try{ renderRealQR('g-qr-'+p.id, p.qr_text, 130); }catch(e){}
+    }, 80);
+  }
 }
 
+// ── Dropdown onChange ─────────────────────────────────────────
+function _gOnSelect(mode){
+  var sel = document.getElementById('g-pass-sel-'+mode);
+  _gSelId = sel && sel.value ? sel.value : null;
+  _gRenderDetail(mode);
+  if(_gSelId){
+    var el = document.getElementById('g-detail-'+mode);
+    if(el) setTimeout(function(){ el.scrollIntoView({behavior:'smooth',block:'start'}); }, 100);
+  }
+}
+
+// ── GATE IN PAGE ──────────────────────────────────────────────
 async function gateInPage(){
   if(role !== 'gate' && role !== 'admin'){ go('passes'); return; }
+  _gSelId = null;
   var m = $('main-area'); if(!m) return;
   m.innerHTML = '<div style="padding:60px;text-align:center;color:var(--muted)">Loading…</div>';
   try {
-    var r = await apiFetch('GET','/passes/gate-eligible');
-    _gateEligible = r.data || [];
+    var r = await apiFetch('GET', '/passes/gate-eligible');
+    _gateEligible = (r.data || []).map(function(v){
+      var p = {
+        id:             v.id,
+        num:            v.pass_number,
+        vname:          v.visitor_name,
+        vco:            v.visitor_company,
+        vphone:         v.visitor_phone,
+        host:           v.host_name,
+        dept:           v.department_name,
+        purpose:        v.purpose,
+        from:           v.valid_from,
+        until:          v.valid_until,
+        companion_count: v.companion_count || 0,
+        companions:     [],
+        preferred_gate: v.preferred_gate,
+        qr_text:        v.qr_text,
+        qr:             !!v.qr_text,
+        logs:           [],
+        status:         'approved',
+      };
+      for(var i = 0; i < (p.companion_count||0); i++){
+        p.companions.push({id:'c'+i, name:'Companion '+(i+1), phone:'', tag:'Companion', isHolder:false});
+      }
+      return p;
+    });
   } catch(e) {
     m.innerHTML = '<div style="padding:40px;text-align:center;color:var(--red)">Failed to load: '+(e.message||'Error')+'</div>';
     return;
   }
+  // Sync GATE_NAMES from loaded gates
+  if(gates.length) GATE_NAMES = gates.map(function(g){ return g.name; });
+  if(!GATE_NAMES.length) GATE_NAMES = ['Main Gate','Gate 2','Gate 3','Visitor Gate'];
 
-  var selPass = _gSelId ? _gateEligible.find(function(p){ return p.id===_gSelId; }) : null;
-  var listHTML = _gateEligible.length
-    ? _gateEligible.map(function(p){ return _gPassRow(p,'in'); }).join('')
-    : '<div style="padding:32px;text-align:center;color:var(--muted);font-size:13.5px">No approved passes awaiting entry</div>';
+  var list = _gateEligible;
+  var opts = '<option value="">— Select a pass number —</option>'
+    + list.map(function(p){
+        var cnt = 1 + (p.companion_count||0);
+        return '<option value="'+p.id+'">'+p.num+' · '+p.vname+(p.vco?' ('+p.vco+')':'')+(cnt>1?' · '+cnt+' persons':'')+'</option>';
+      }).join('');
 
   m.innerHTML = '<div class="page-header fade">'
-    +'<div><h1 class="page-title">Gate In</h1><p class="page-sub">'+_gateEligible.length+' pass'+((_gateEligible.length!==1)?'es':'')+' awaiting entry</p></div>'
-    +'<button class="btn bo" onclick="gateInPage()" title="Refresh">'
-      +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>'
-      +' Refresh'
-    +'</button>'
-  +'</div>'
-  +'<div class="page-content fade" style="display:grid;grid-template-columns:1fr '+(selPass?'340px':'0px')+';gap:20px;align-items:start">'
-    +'<div class="card" style="padding:8px">'+listHTML+'</div>'
-    +(selPass
-      ? '<div style="position:sticky;top:20px">'+_gDetailPanel(selPass,'in')+'</div>'
-      : '<div></div>')
-  +'</div>';
+    +'<div><h1 class="page-title">Gate In</h1>'
+    +'<p class="page-sub">Select an approved pass, verify details and confirm entry</p></div>'
+    +'</div>'
+    +'<div class="page-content fade"><div class="gate-page-wrap">'
+    +(list.length === 0
+      ? '<div class="gate-empty-state">'
+          +'<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--dim)" stroke-width="1.5" stroke-linecap="round" style="margin-bottom:12px"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>'
+          +'<div style="font-size:15px;font-weight:600;color:var(--navy);margin-bottom:6px">No passes awaiting entry</div>'
+          +'<div style="font-size:13px">All approved passes are inside or expired.</div>'
+        +'</div>'
+      : '<div class="gate-section-label">Select Pass Number</div>'
+        +'<div class="gate-select-wrap">'
+          +'<select id="g-pass-sel-in" onchange="_gOnSelect(\'in\')">'
+          +opts+'</select>'
+        +'</div>'
+        +'<div id="g-detail-in"></div>'
+    )
+    +'</div></div>';
 }
 
+// ── GATE OUT PAGE ─────────────────────────────────────────────
 async function gateOutPage(){
   if(role !== 'gate' && role !== 'admin'){ go('passes'); return; }
+  _gSelId = null;
   var m = $('main-area'); if(!m) return;
   m.innerHTML = '<div style="padding:60px;text-align:center;color:var(--muted)">Loading…</div>';
   try {
-    var r = await apiFetch('GET','/passes/currently-inside');
-    _gateInside = r.data || [];
+    var r = await apiFetch('GET', '/passes/currently-inside');
+    _gateInside = (r.data || []).map(function(v){
+      var eTime = v.entry_time ? new Date(v.entry_time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : '';
+      return {
+        id:             v.pass_id,
+        num:            v.pass_number,
+        vname:          v.visitor_name,
+        vco:            v.visitor_company,
+        vphone:         '',
+        host:           v.host_name,
+        dept:           '',
+        purpose:        '',
+        from:           '',
+        until:          '',
+        companions:     [],
+        companion_count: 0,
+        preferred_gate: v.gate_name,
+        qr_text:        null,
+        qr:             false,
+        logs:           [{type:'entry', time:eTime, gate:v.gate_name, logged_at:v.entry_time}],
+        status:         'approved',
+        _entry_time:    v.entry_time,
+        _gate_name:     v.gate_name,
+      };
+    });
   } catch(e) {
     m.innerHTML = '<div style="padding:40px;text-align:center;color:var(--red)">Failed to load: '+(e.message||'Error')+'</div>';
     return;
   }
+  // Sync GATE_NAMES
+  if(gates.length) GATE_NAMES = gates.map(function(g){ return g.name; });
+  if(!GATE_NAMES.length) GATE_NAMES = ['Main Gate','Gate 2','Gate 3','Visitor Gate'];
 
-  // Normalise field names from v_currently_inside view
-  _gateInside = _gateInside.map(function(v){
-    return {
-      id: v.pass_id,
-      pass_number: v.pass_number,
-      visitor_name: v.visitor_name,
-      visitor_company: v.visitor_company,
-      host_name: v.host_name,
-      gate_name: v.gate_name,
-      entry_time: v.entry_time,
-      companion_count: 0,
-      purpose: '',
-      preferred_gate: v.gate_name,
-    };
-  });
-
-  var selPass = _gSelId ? _gateInside.find(function(p){ return p.id===_gSelId; }) : null;
-  var listHTML = _gateInside.length
-    ? _gateInside.map(function(p){ return _gPassRow(p,'out'); }).join('')
-    : '<div style="padding:32px;text-align:center;color:var(--muted);font-size:13.5px">No visitors currently inside</div>';
+  var list = _gateInside;
+  var opts = '<option value="">— Select a pass number —</option>'
+    + list.map(function(p){
+        var eTime = p._entry_time
+          ? new Date(p._entry_time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})
+          : '';
+        var cnt = 1 + (p.companion_count||0);
+        return '<option value="'+p.id+'">'+p.num+' · '+p.vname+(p.vco?' ('+p.vco+')':'')+(eTime?' · In: '+eTime:'')+(cnt>1?' · '+cnt+' persons':'')+'</option>';
+      }).join('');
 
   m.innerHTML = '<div class="page-header fade">'
-    +'<div><h1 class="page-title">Gate Out</h1><p class="page-sub">'+_gateInside.length+' visitor'+(_gateInside.length!==1?'s':'')+' currently inside</p></div>'
-    +'<button class="btn bo" onclick="gateOutPage()" title="Refresh">'
-      +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>'
-      +' Refresh'
-    +'</button>'
-  +'</div>'
-  +'<div class="page-content fade" style="display:grid;grid-template-columns:1fr '+(selPass?'340px':'0px')+';gap:20px;align-items:start">'
-    +'<div class="card" style="padding:8px">'+listHTML+'</div>'
-    +(selPass
-      ? '<div style="position:sticky;top:20px">'+_gDetailPanel(selPass,'out')+'</div>'
-      : '<div></div>')
-  +'</div>';
+    +'<div><h1 class="page-title">Gate Out</h1>'
+    +'<p class="page-sub">Select a visitor inside, verify details and confirm exit</p></div>'
+    +'</div>'
+    +'<div class="page-content fade"><div class="gate-page-wrap">'
+    +(list.length === 0
+      ? '<div class="gate-empty-state">'
+          +'<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--dim)" stroke-width="1.5" stroke-linecap="round" style="margin-bottom:12px"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>'
+          +'<div style="font-size:15px;font-weight:600;color:var(--navy);margin-bottom:6px">No visitors currently inside</div>'
+          +'<div style="font-size:13px">Use Gate In to log a visitor entry first.</div>'
+        +'</div>'
+      : '<div class="gate-section-label">Select Pass Number</div>'
+        +'<div class="gate-select-wrap">'
+          +'<select id="g-pass-sel-out" onchange="_gOnSelect(\'out\')">'
+          +opts+'</select>'
+        +'</div>'
+        +'<div id="g-detail-out"></div>'
+    )
+    +'</div></div>';
 }
 
+// ── Confirm Gate In / Gate Out (API) ──────────────────────────
 async function _gConfirm(mode, passId){
-  var logType  = mode === 'in' ? 'entry' : 'exit';
-  var gateEl   = document.getElementById('ggate-'+mode);
-  var gateName = gateEl ? gateEl.value : 'Main Gate';
+  var arr = mode==='in' ? _gateEligible : _gateInside;
+  var p = arr.find(function(x){ return x.id===passId; });
+  if(!p){ toast('Pass not found','err'); return; }
 
-  // Disable button to prevent double-click
-  var btns = document.querySelectorAll('button[onclick*="_gConfirm"]');
-  btns.forEach(function(b){ b.disabled=true; b.textContent='Processing…'; });
+  var gateEl  = document.getElementById('ggate-'+mode);
+  var gate    = gateEl ? gateEl.value : (GATE_NAMES[0]||'Main Gate');
+  var persons = _allPersons(p).map(function(per){ return per.name; });
+
+  var btn = document.querySelector('button[onclick*="_gConfirm"]');
+  if(btn){ btn.disabled=true; btn.textContent='Processing…'; }
 
   try {
     var r = await apiFetch('POST', '/passes/'+passId+'/gate-log', {
-      log_type: logType,
-      gate_name: gateName,
+      log_type:  mode==='in' ? 'entry' : 'exit',
+      gate_name: gate,
     });
 
     var durStr = (r.data && r.data.duration_mins != null) ? r.data.duration_mins+' min inside' : '';
@@ -2743,18 +2900,166 @@ async function _gConfirm(mode, passId){
     } catch(_){}
 
     if(mode === 'in'){
-      toast('\u2713 Gate In — '+gateName+' logged');
+      toast('\u2713 Gate In \u2014 '+persons[0]+(persons.length>1?' + '+(persons.length-1)+' others':'')+' via '+gate);
     } else {
-      toast('\u2713 Gate Out' + (durStr?' · '+durStr:'') + ' — logged');
+      toast('\u2713 Gate Out \u2014 '+persons[0]+(durStr?' \u00b7 '+durStr:''));
     }
-
     _gSelId = null;
+    renderNav();
     mode === 'in' ? gateInPage() : gateOutPage();
 
   } catch(e){
     toast((e.message||'Gate log failed'), 'err');
-    btns.forEach(function(b){ b.disabled=false; b.textContent=mode==='in'?'Confirm Gate In':'Confirm Gate Out'; });
+    if(btn){ btn.disabled=false; btn.textContent=mode==='in'?'Confirm Gate In':'Confirm Gate Out'; }
   }
+}
+
+// ─── Legacy stubs (kept so any old onclick refs don't throw) ──
+function _gPassRow(p, mode){ return ''; }
+function _gDetailPanel(p, mode){ return ''; }
+function _gSelect(passId, mode){ _gSelId=passId; mode==='in'?gateInPage():gateOutPage(); }
+function _gAv(){ return ''; }
+// ─────────────────────────────────────────────────────────────
+function _gPassRow_OLD(p, mode){
+  var sel = _gSelId === p.id;
+  var since = '';
+  if(mode === 'out' && p.entry_time){
+    var mins = Math.round((Date.now() - new Date(p.entry_time).getTime()) / 60000);
+    since = ' · <span style="color:var(--green);font-weight:600">'+mins+' min inside</span>';
+  }
+  return '<div id="grow-'+p.id+'" onclick="_gSelect(\''+p.id+'\',\''+mode+'\')" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:10px;cursor:pointer;transition:all .15s;border:2px solid '+(sel?'var(--acc)':'transparent')+';background:'+(sel?'var(--acc3)':'var(--white)')+';margin-bottom:4px">'
+    +_gAv(p.visitor_name||p.vname||'', 38)
+    +'<div style="flex:1;min-width:0">'
+      +'<div style="font-weight:600;font-size:14px;color:var(--navy)">'+escHtml(p.visitor_name||p.vname||'')+'</div>'
+      +'<div style="font-size:12px;color:var(--muted);margin-top:1px">'+escHtml(p.visitor_company||p.vco||'Individual')+' · '+escHtml(p.host_name||p.host||'')+since+'</div>'
+    +'</div>'
+    +'<div style="text-align:right;flex-shrink:0">'
+      +'<div style="font-size:11.5px;font-family:monospace;color:var(--acc);font-weight:600">'+escHtml(p.pass_number||p.num||'')+'</div>'
+      +(p.preferred_gate||p.gate_name?'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+escHtml(p.preferred_gate||p.gate_name||'')+'</div>':'')
+    +'</div>'
+  +'</div>';
+}
+
+/* Build the full pass card for the gate confirmation panel — OLD, superseded by _gPassCard */
+function _gDetailPanel_OLD(p, mode){
+  var passNum  = p.pass_number || p.num || '';
+  var visName  = p.visitor_name || p.vname || '';
+  var visCo    = p.visitor_company || p.vco || 'Individual visitor';
+  var visPhone = p.visitor_phone || p.vphone || '';
+  var mo       = p.host_name || p.host || '';
+  var dept     = p.department_name || p.dept || '';
+  var purpose  = (p.purpose||'').charAt(0).toUpperCase()+(p.purpose||'').slice(1);
+  var validFrom  = fdts(p.valid_from  || p.from  || '');
+  var validUntil = fdts(p.valid_until || p.until || '');
+  var qrText   = p.qr_text || p.qr_url || '';
+  var qrId     = 'gate-qr-'+p.id;
+  var total    = 1 + (p.companion_count||0);
+
+  var gateOpts = gates.length
+    ? gates.map(function(g){ return '<option value="'+escHtml(g.name)+'"'+(p.preferred_gate===g.name?' selected':'')+'>'+escHtml(g.name)+'</option>'; }).join('')
+    : '<option>Main Gate</option><option>Gate 2</option><option>Gate 3</option><option>Visitor Gate</option>';
+
+  // Entry time bar — shown for Gate Out
+  var entryBar = '';
+  if(mode === 'out' && p.entry_time){
+    var mins = Math.round((Date.now() - new Date(p.entry_time).getTime()) / 60000);
+    var entryTimeStr = new Date(p.entry_time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+    entryBar = '<div style="display:flex;align-items:center;gap:10px;padding:11px 14px;background:#eff6ff;border-radius:10px;border:1.5px solid #bfdbfe;margin-bottom:14px">'
+      +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
+      +'<div>'
+        +'<div style="font-size:12.5px;font-weight:600;color:#1e40af">Entered via '+escHtml(p.gate_name||'Main Gate')+' at '+entryTimeStr+'</div>'
+        +'<div style="font-size:11.5px;color:#3b82f6;margin-top:1px">Time inside so far: <strong>'+mins+' min</strong></div>'
+      +'</div>'
+    +'</div>';
+  }
+
+  // Persons section
+  var personsHtml = '<div style="margin-bottom:16px">'
+    +'<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Persons on this pass</div>'
+    // Main visitor row
+    +'<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">'
+      +_gAv(visName, 32)
+      +'<div style="flex:1;min-width:0">'
+        +'<div style="font-weight:600;font-size:13px;color:var(--navy)">'+escHtml(visName)+'</div>'
+        +(visPhone?'<div style="font-size:11.5px;color:var(--muted)">'+escHtml(visPhone)+'</div>':'')
+      +'</div>'
+      +'<span style="font-size:10.5px;background:var(--acc3);color:var(--acc);border-radius:20px;padding:2px 8px;font-weight:700;flex-shrink:0">Pass Holder</span>'
+    +'</div>'
+    +(p.companion_count>0
+      ? '<div style="padding:8px 0;font-size:12.5px;color:var(--muted)">+'+p.companion_count+' additional visitor'+(p.companion_count>1?'s':'')+'</div>'
+      : '')
+    +'<div style="margin-top:8px;padding:9px 12px;background:var(--surf);border-radius:8px;border:1px solid var(--border);font-size:13px;font-weight:600;color:var(--navy)">'
+      +total+' person'+(total>1?'s':'')+' — all will be gated '+(mode==='in'?'in':'out')
+    +'</div>'
+  +'</div>';
+
+  return '<div class="card" style="padding:0;overflow:hidden;border:none;box-shadow:0 4px 24px rgba(15,23,42,.12)">'
+    // ── Dark header ───────────────────────────────────────
+    +'<div style="padding:14px 18px;background:linear-gradient(135deg,#0f172a 0%,#1a3a5c 100%);display:flex;align-items:center;justify-content:space-between">'
+      +'<div>'
+        +'<div style="font-size:9.5px;font-weight:700;color:rgba(255,255,255,.45);letter-spacing:.14em;text-transform:uppercase;margin-bottom:3px">Security Pass</div>'
+        +'<div style="font-size:17px;font-weight:700;color:#fff;font-family:monospace;letter-spacing:.04em">'+escHtml(passNum)+'</div>'
+      +'</div>'
+      +'<button onclick="_gSelId=null;'+(mode==='in'?'gateInPage':'gateOutPage')+'()" title="Close" style="background:rgba(255,255,255,.1);border:none;color:rgba(255,255,255,.8);width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:18px;line-height:1;display:flex;align-items:center;justify-content:center">&times;</button>'
+    +'</div>'
+
+    // ── Visitor info + QR ─────────────────────────────────
+    +'<div style="padding:18px;border-bottom:1px solid var(--border)">'
+      +'<div style="display:flex;align-items:flex-start;gap:14px">'
+        +'<div style="flex:1;min-width:0">'
+          +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'
+            +_gAv(visName, 46)
+            +'<div>'
+              +'<div style="font-size:15.5px;font-weight:700;color:var(--navy)">'+escHtml(visName)+'</div>'
+              +'<div style="font-size:12px;color:var(--muted);margin-top:1px">'+escHtml(visCo)+'</div>'
+              +(visPhone?'<div style="font-size:12px;color:var(--muted)">'+escHtml(visPhone)+'</div>':'')
+            +'</div>'
+          +'</div>'
+          +(mo?'<div style="font-size:12.5px;margin-bottom:3px"><span style="color:var(--muted)">Officer: </span><span style="font-weight:600;color:var(--navy)">'+escHtml(mo)+(dept?' · <span style="color:var(--muted)">'+escHtml(dept)+'</span>':'')+'</span></div>':'')
+          +(purpose?'<div style="font-size:12.5px"><span style="color:var(--muted)">Purpose: </span><span style="font-weight:600;color:var(--navy);text-transform:capitalize">'+escHtml(purpose)+'</span></div>':'')
+        +'</div>'
+        +(qrText && mode==='in'
+          ? '<div style="flex-shrink:0;padding:5px;border:1px solid var(--border);border-radius:8px;background:#fff;align-self:flex-start">'
+              +'<div id="'+qrId+'" style="width:80px;height:80px;display:flex;align-items:center;justify-content:center"></div>'
+            +'</div>'
+          : '')
+      +'</div>'
+    +'</div>'
+
+    // ── Valid dates ───────────────────────────────────────
+    +'<div style="padding:14px 18px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+      +'<div style="padding:9px 11px;background:var(--surf);border-radius:8px">'
+        +'<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em">Valid From</div>'
+        +'<div style="font-size:12.5px;font-weight:600;color:var(--navy);margin-top:3px">'+validFrom+'</div>'
+      +'</div>'
+      +'<div style="padding:9px 11px;background:var(--surf);border-radius:8px">'
+        +'<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em">Valid Until</div>'
+        +'<div style="font-size:12.5px;font-weight:600;color:var(--navy);margin-top:3px">'+validUntil+'</div>'
+      +'</div>'
+    +'</div>'
+
+    // ── Persons + action ──────────────────────────────────
+    +'<div style="padding:18px">'
+      +entryBar
+      +personsHtml
+
+      // Gate selector
+      +'<div style="margin-bottom:12px">'
+        +'<label style="font-size:11.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:6px">Gate</label>'
+        +'<select id="ggate-'+mode+'" style="width:100%;padding:11px 13px;font-size:13.5px;font-family:var(--font-body);border-radius:var(--rlg)">'+gateOpts+'</select>'
+      +'</div>'
+
+      // Confirm button
+      +'<button class="btn '+(mode==='in'?'bp':'bd')+'" style="width:100%;justify-content:center;padding:13px;font-size:14px" onclick="_gConfirm(\''+mode+'\',\''+p.id+'\')">'
+        +'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">'
+          +(mode==='in'
+            ?'<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>'
+            :'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>')
+        +'</svg>'
+        +' Confirm Gate '+(mode==='in'?'In':'Out')
+      +'</button>'
+    +'</div>'
+  +'</div>';
 }
 
 /* Dashboard refresh for Currently Inside */
@@ -2921,49 +3226,54 @@ function _renderRCCard(d, blacklisted, warningMsg){
 /* ── GOVT ID VALIDATION ─────────────────────────────── */
 var GOVT_ID_RULES = {
   'Aadhaar': {
-    pattern:   /^\d{12}$/,
-    maxLength: 12, minLength: 12,
-    hint:      '12-digit number',
-    example:   '234567890123',
-    sanitize:  function(v){ return v.replace(/[\s\-]/g,''); },
-    errorMsg:  'Aadhaar must be exactly 12 digits',
-    checksum:  false,
+    pattern:        /^\d{12}$/,
+    maxLength:      12, minLength: 12,
+    inputMaxLength: 14,   // 12 digits + 2 spaces: XXXX XXXX XXXX
+    hint:           '12-digit number',
+    example:        '2345 6789 0123',
+    sanitize:       function(v){ return v.replace(/[\s\-]/g,''); },
+    errorMsg:       'Aadhaar must be exactly 12 digits',
+    checksum:       false,
   },
   'PAN': {
-    pattern:   /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/,
-    maxLength: 10, minLength: 10,
-    hint:      '10 chars: 5 letters, 4 digits, 1 letter',
-    example:   'ABCDE1234F',
-    sanitize:  function(v){ return v.toUpperCase().replace(/\s/g,''); },
-    errorMsg:  'PAN must be 10 characters (e.g. ABCDE1234F)',
-    checksum:  false,
+    pattern:        /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/,
+    maxLength:      10, minLength: 10,
+    inputMaxLength: 10,
+    hint:           '5 letters + 4 digits + 1 letter',
+    example:        'ABCDE1234F',
+    sanitize:       function(v){ return v.toUpperCase().replace(/\s/g,''); },
+    errorMsg:       'PAN must be 10 characters (e.g. ABCDE1234F)',
+    checksum:       false,
   },
   'Passport': {
-    pattern:   /^[A-Z][1-9][0-9]{7}$/,
-    maxLength: 9, minLength: 9,
-    hint:      '1 letter + 8 digits (e.g. A12345678)',
-    example:   'A12345678',
-    sanitize:  function(v){ return v.toUpperCase().replace(/\s/g,''); },
-    errorMsg:  'Passport: 1 letter followed by 8 digits (e.g. A12345678)',
-    checksum:  false,
+    pattern:        /^[A-Z][1-9][0-9]{7}$/,
+    maxLength:      9, minLength: 9,
+    inputMaxLength: 9,
+    hint:           '1 letter + 8 digits',
+    example:        'A12345678',
+    sanitize:       function(v){ return v.toUpperCase().replace(/\s/g,''); },
+    errorMsg:       'Passport: 1 letter followed by 8 digits (e.g. A12345678)',
+    checksum:       false,
   },
   'Driving Licence': {
-    pattern:   /^[A-Z]{2}[0-9]{13}$/,
-    maxLength: 16, minLength: 15,
-    hint:      'State + year + 11 digits (e.g. DL0120110012345)',
-    example:   'DL0120110012345',
-    sanitize:  function(v){ return v.toUpperCase().replace(/[\s\-]/g,''); },
-    errorMsg:  'Driving Licence must be 15 chars (e.g. DL0120110012345)',
-    checksum:  false,
+    pattern:        /^[A-Z]{2}[0-9]{13}$/,
+    maxLength:      15, minLength: 15,
+    inputMaxLength: 15,
+    hint:           'State code + 13 digits (15 chars)',
+    example:        'DL0120110012345',
+    sanitize:       function(v){ return v.toUpperCase().replace(/[\s\-]/g,''); },
+    errorMsg:       'Driving Licence must be exactly 15 characters (e.g. DL0120110012345)',
+    checksum:       false,
   },
   'Voter ID': {
-    pattern:   /^[A-Z]{3}[0-9]{7}$/,
-    maxLength: 10, minLength: 10,
-    hint:      '3 letters + 7 digits (e.g. ABC1234567)',
-    example:   'ABC1234567',
-    sanitize:  function(v){ return v.toUpperCase().replace(/\s/g,''); },
-    errorMsg:  'Voter ID must be 10 chars: 3 letters + 7 digits',
-    checksum:  false,
+    pattern:        /^[A-Z]{3}[0-9]{7}$/,
+    maxLength:      10, minLength: 10,
+    inputMaxLength: 10,
+    hint:           '3 letters + 7 digits',
+    example:        'ABC1234567',
+    sanitize:       function(v){ return v.toUpperCase().replace(/\s/g,''); },
+    errorMsg:       'Voter ID must be 10 chars: 3 letters + 7 digits',
+    checksum:       false,
   },
 };
 
@@ -2980,8 +3290,6 @@ function validateGovtId(idType, rawValue){
   var rule = GOVT_ID_RULES[idType];
   if(!rule) return {valid:true, warning:null};
   var s = rule.sanitize(rawValue);
-  if(s.length > rule.maxLength)
-    return {valid:false, error:idType+' cannot exceed '+rule.maxLength+' characters (you entered '+s.length+')'};
   if(s.length < rule.minLength)
     return {valid:false, error:idType+' must be '+rule.minLength+' characters (you entered '+s.length+')'};
   if(!rule.pattern.test(s))
@@ -3026,7 +3334,7 @@ function makeIdValidator(typeSelId, inputId, errId, cntId){
   typeSel.addEventListener('change', function(){
     var rule = GOVT_ID_RULES[this.value];
     inp.value = '';
-    inp.maxLength = rule ? rule.maxLength + 2 : 50;
+    inp.maxLength = rule ? rule.inputMaxLength : 50;
     inp.placeholder = rule ? rule.hint : 'ID number';
     clearState();
   });
@@ -3050,7 +3358,12 @@ function makeIdValidator(typeSelId, inputId, errId, cntId){
       if(this.value.replace(/\s/g,'').length===12) this.value=this.value.trimEnd();
     }
 
+    // Hard-truncate safety belt (in case paste bypasses maxlength)
     var s = rule.sanitize(this.value);
+    if(s.length > rule.maxLength){
+      this.value = s.slice(0, rule.maxLength);
+      s = this.value;
+    }
     updateCounter(s, rule);
     if(s.length >= rule.minLength){
       var res = validateGovtId(idType, this.value);
@@ -3077,7 +3390,7 @@ function onVitChange(type){
   var inp = document.getElementById('vi');
   if(inp){
     inp.placeholder = rule ? rule.hint : 'ID number';
-    inp.maxLength   = rule ? rule.maxLength + 2 : 50;
+    inp.maxLength   = rule ? rule.inputMaxLength : 50;
     inp.value = '';
   }
   passFieldClear('vi');
@@ -3102,8 +3415,7 @@ async function submitPass(){
   if(!phone.trim()){ passFieldErr('vp','Contact number is required'); hasErr=true; }
   var emailVal = (($('ve')||{}).value||'').trim();
   if(!emailVal){ passFieldErr('ve','Email address is required'); hasErr=true; }
-  var coVal = (($('vc')||{}).value||'').trim();
-  if(!coVal){ passFieldErr('vc','Company / Organisation is required'); hasErr=true; }
+  var coVal = (($('vc')||{}).value||'').trim(); // optional
   // ── Govt ID
   var idType = ($('vit')||{}).value||'';
   var idNum  = (($('vi')||{}).value||'').trim();
@@ -3121,19 +3433,15 @@ async function submitPass(){
       toast(idRes.warning, 'warn');
     }
   }
-  // ── Vehicle
+  // ── Vehicle (optional)
   var vvnVal = (($('vvn')||{}).value||'').trim();
   var vvtVal = ($('vvt')||{}).value||'';
-  if(!vvnVal){ passFieldErr('vvn','Vehicle number is required'); hasErr=true; }
-  if(!vvtVal || vvtVal === 'none'){ passFieldErr('vvt','Please select a vehicle type'); hasErr=true; }
   // ── Address
   var vaddrVal = (($('vaddr')||{}).value||'').trim();
   if(!vaddrVal){ passFieldErr('vaddr','Address is required'); hasErr=true; }
   // ── Visit info
-  var gateVal = ($('entry-gate')||{}).value||'';
   if(!moSel){ passFieldErr('mo-select','Please select a Meeting Officer'); hasErr=true; }
   if(!purp){ passFieldErr('pp','Please select the purpose of visit'); hasErr=true; }
-  if(!gateVal){ passFieldErr('entry-gate','Please select an entry gate'); hasErr=true; }
   // ── Description
   var pdetVal = (($('pdet')||{}).value||'').trim();
   if(!pdetVal){ passFieldErr('pdet','Description / Agenda is required'); hasErr=true; }
@@ -3187,7 +3495,6 @@ async function submitPass(){
       photo_url:capturedPhoto||undefined,
       companions:validCompanions.length ? validCompanions : undefined,
       companion_count:validCompanions.length||undefined,
-      preferred_gate:gateVal||undefined,
     });
     passClearErrs();
     var newp = mapPass(r.data);
@@ -3436,6 +3743,74 @@ async function _getPassForGP(passId){
 }
 
 async function _buildGatePassDoc(p){
+  if(!window.html2canvas){ toast('PDF renderer not loaded — refresh and try again','warn'); return null; }
+  if(!window.jspdf || !window.jspdf.jsPDF){ toast('PDF library not loaded — refresh and try again','warn'); return null; }
+
+  // Build the styled pass card using the exact same _gPassCard() HTML used in-app
+  var cardHtml = _gPassCard(p, 'in');
+  // Append persons list if the pass has companions
+  var totalPersons = 1 + (p.companion_count || (p.companions||[]).length || 0);
+  if(totalPersons > 1){
+    cardHtml += _gPersonsList(p, 'in');
+  }
+
+  // Off-screen container — must be in DOM for CSS vars to resolve.
+  // display:inline-block shrinks height to card content, eliminating top gap.
+  var container = document.createElement('div');
+  container.style.cssText =
+    'position:fixed;left:-9999px;top:0;'
+    +'width:760px;display:inline-block;'
+    +'background:#ffffff;padding:0;margin:0;'
+    +'font-family:Inter,system-ui,-apple-system,sans-serif;';
+  container.innerHTML = cardHtml;
+  document.body.appendChild(container);
+
+  // Render QR into the placeholder div the card already created
+  var qrId = 'g-qr-' + p.id;
+  var qrEl  = container.querySelector('#'+qrId);
+  if(qrEl && p.qr_text){
+    try {
+      new QRCode(qrEl, {
+        text: p.qr_text, width: 130, height: 130,
+        colorDark: '#0f172a', colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.M,
+      });
+      // Wait for QRCode to finish rendering its canvas/img
+      await new Promise(function(r){ setTimeout(r, 350); });
+    } catch(_){}
+  }
+
+  try {
+    var canvas = await html2canvas(container, {
+      scale:           2,
+      useCORS:         true,
+      allowTaint:      true,
+      backgroundColor: '#ffffff',
+      logging:         false,
+    });
+
+    var { jsPDF } = window.jspdf;
+    var imgData  = canvas.toDataURL('image/png');
+    var margin   = 10;            // 10mm margin on all sides
+    var printW   = 210 - margin * 2;   // 190mm usable width
+    var printH   = (canvas.height * printW) / canvas.width;
+
+    var doc = new jsPDF({
+      orientation: 'portrait',
+      unit:        'mm',
+      format:      'a4',
+    });
+    // Always place card at top-left with equal side margins — no vertical centering
+    doc.addImage(imgData, 'PNG', margin, margin, printW, printH);
+
+    return doc;
+  } finally {
+    document.body.removeChild(container);
+  }
+}
+
+// ─── KEEP OLD jsPDF manual builder (unused) for fallback reference ─────────
+async function _buildGatePassDocLegacy_UNUSED(p){
   var qrDataUrl;
   try { qrDataUrl = await _qrToDataURL(p.qr_text); }
   catch(e){ toast('QR render failed — try again','err'); return null; }
@@ -3636,11 +4011,9 @@ async function _buildGatePassDoc(p){
 }
 
 async function downloadGatePass(passId){
-  if(!window.jspdf || !window.jspdf.jsPDF){ toast('PDF library not loaded — try again','warn'); return; }
   var p = await _getPassForGP(passId);
   if(!p){ toast('Pass not found','err'); return; }
   if(p.status !== 'approved'){ toast('Pass must be approved to download','warn'); return; }
-  if(!p.qr_text){ toast('QR not available for this pass','warn'); return; }
   toast('Generating gate pass PDF…');
   var doc = await _buildGatePassDoc(p);
   if(!doc) return;
@@ -3649,11 +4022,9 @@ async function downloadGatePass(passId){
 }
 
 async function printGatePassPDF(passId){
-  if(!window.jspdf || !window.jspdf.jsPDF){ toast('PDF library not loaded — try again','warn'); return; }
   var p = await _getPassForGP(passId);
   if(!p){ toast('Pass not found','err'); return; }
   if(p.status !== 'approved'){ toast('Pass must be approved to print','warn'); return; }
-  if(!p.qr_text){ toast('QR not available for this pass','warn'); return; }
   toast('Preparing print…');
   var doc = await _buildGatePassDoc(p);
   if(!doc) return;
